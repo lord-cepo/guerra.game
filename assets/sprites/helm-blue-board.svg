@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title desc"><defs><clipPath id="board-crop"><rect x="0" y="0" width="512" height="358.4"/></clipPath></defs><g clip-path="url(#board-crop)">
+  <title id="title">Symmetric helmet icon</title>
+  <desc id="desc">Clean white outline of a symmetric stylized helmet on a transparent background.</desc>
+  <g fill="none" stroke="#3b82f6" stroke-width="40" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Outer helmet shell -->
+    <path d="M20 397V176C20 91 124 28 256 28S492 91 492 176V397"/>
+
+    <!-- Lower side openings and cheek guards -->
+    <path d="M20 397C95 397 156 427 184 486H196V365"/>
+    <path d="M492 397C417 397 356 427 328 486H316V365"/>
+
+    <!-- Visor / face opening, constructed from mirrored geometry -->
+    <path d="M82 208L214 234M82 208C64 286 108 347 196 365"/>
+    <path d="M430 208L298 234M430 208C448 286 404 347 316 365"/>
+
+    <!-- Central nose opening -->
+    <ellipse cx="256" cy="243" rx="34" ry="58"/>
+  </g>
+</g></svg>

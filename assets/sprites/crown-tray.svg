@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">Symmetric crown icon</title>
+  <desc id="desc">Clean white outline of a symmetric crown on a transparent background.</desc>
+  <g fill="none" stroke="#fff" stroke-width="14" stroke-linecap="round">
+    <!-- Crown body: one continuous symmetric path avoids overlap spikes -->
+    <path d="M54 428L31 151L166 247L256 31L346 247L481 151L458 428"
+          stroke-linejoin="miter" stroke-miterlimit="3"/>
+
+    <!-- Base drawn last so the side endpoints meet it cleanly -->
+    <rect x="31" y="428" width="450" height="62" rx="10" ry="10" stroke-linejoin="round"/>
+  </g>
+</svg>

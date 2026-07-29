@@ -1,0 +1,15 @@
+{
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "check": "tsc --project tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests",
+    "start": "node server.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "ws": "^8.21.1"
+  }
+}

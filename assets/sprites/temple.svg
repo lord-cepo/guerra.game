@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-label="Symmetric temple icon">
+  <g fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Sweeping outer roof -->
+    <path d="M40 385
+             C205 395 365 315 465 195
+             C491 164 500 122 500 70
+             C500 122 509 164 535 195
+             C635 315 795 395 960 385"/>
+
+    <!-- Curved underside of roof, joining the temple body -->
+    <path d="M58 386
+             C165 402 244 451 278 525
+             C356 505 429 490 500 490
+             C571 490 644 505 722 525
+             C756 451 835 402 942 386"/>
+
+    <!-- Curved temple body -->
+    <path d="M185 560
+             C300 541 410 515 500 515
+             C590 515 700 541 815 560
+             C826 672 826 790 810 900
+             C705 883 610 872 500 872
+             C390 872 295 883 190 900
+             C174 790 174 672 185 560 Z"/>
+
+    <!-- Base -->
+    <path d="M115 932 C310 920 690 920 885 932"/>
+  </g>
+</svg>

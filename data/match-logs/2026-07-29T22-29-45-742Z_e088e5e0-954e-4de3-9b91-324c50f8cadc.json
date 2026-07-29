@@ -1,0 +1,3222 @@
+{
+  "schemaVersion": 1,
+  "savedAt": "2026-07-29T22:32:50.354Z",
+  "reason": "server-sigint",
+  "matchId": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+  "createdAt": "2026-07-29T22:29:45.742Z",
+  "snapshots": [
+    {
+      "at": "2026-07-29T22:29:45.742Z",
+      "kind": "sandbox-created",
+      "player": 1,
+      "nickname": "cagotto8",
+      "state": {
+        "id": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+        "revision": 23,
+        "status": "active",
+        "activePlayer": 2,
+        "players": {
+          "1": "cagotto8",
+          "2": "cagotto8"
+        },
+        "sandbox": true,
+        "sandboxSide": 2,
+        "sandboxFreePlacement": false,
+        "format": 8,
+        "ready": {
+          "1": true,
+          "2": true
+        },
+        "deckChoices": {
+          "1": 0,
+          "2": 0
+        },
+        "selections": {},
+        "targetSelections": {},
+        "decks": {
+          "1": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ],
+          "2": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ]
+        },
+        "units": [
+          {
+            "id": "1:queen-bee",
+            "troopId": "queen-bee",
+            "owner": 1,
+            "coordinate": "1,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "2:squirrel-king",
+            "troopId": "squirrel-king",
+            "owner": 2,
+            "coordinate": "-1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 4
+          },
+          {
+            "id": "1:push-scout",
+            "troopId": "push-scout",
+            "owner": 1,
+            "coordinate": "3,3",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:sahel-porcupine",
+            "troopId": "sahel-porcupine",
+            "owner": 2,
+            "coordinate": "-1,2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "1:walnut-crab",
+            "troopId": "walnut-crab",
+            "owner": 1,
+            "coordinate": "3,0",
+            "permanentDamage": 0,
+            "currentHealth": 2
+          },
+          {
+            "id": "2:coconut-crab",
+            "troopId": "coconut-crab",
+            "owner": 2,
+            "coordinate": "0,-2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "1:cinder-heron",
+            "troopId": "cinder-heron",
+            "owner": 1,
+            "coordinate": "0,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:moss-tortoise",
+            "troopId": "moss-tortoise",
+            "owner": 2,
+            "coordinate": "1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 1
+          }
+        ],
+        "defeatedTroopIds": [
+          "2:canyon-ibex",
+          "1:moss-tortoise",
+          "1:war-temple"
+        ],
+        "effects": [],
+        "bashes": [],
+        "triggerEvents": [],
+        "lastActingTroopId": {
+          "1": "cinder-heron",
+          "2": "sahel-porcupine"
+        },
+        "control": {
+          "p1-start": {
+            "id": "p1-start",
+            "type": "starting",
+            "home": 1,
+            "playerOne": 0.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-start": {
+            "id": "p2-start",
+            "type": "starting",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 4.5,
+            "controller": 2
+          },
+          "p1-middle": {
+            "id": "p1-middle",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 2.5,
+            "playerTwo": 2,
+            "controller": 1
+          },
+          "p2-middle": {
+            "id": "p2-middle",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 2.5,
+            "controller": 2
+          },
+          "p1-side": {
+            "id": "p1-side",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 3.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-side": {
+            "id": "p2-side",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 0.5,
+            "controller": 2
+          },
+          "front": {
+            "id": "front",
+            "type": "front",
+            "playerOne": 2,
+            "playerTwo": 0,
+            "controller": 1
+          }
+        },
+        "events": [
+          {
+            "revision": 1,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 2,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "squirrel-king",
+              "coordinate": "-1,-2"
+            }
+          },
+          {
+            "revision": 3,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "push-scout",
+              "coordinate": "3,3"
+            }
+          },
+          {
+            "revision": 4,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "canyon-ibex",
+              "coordinate": "1,-1"
+            }
+          },
+          {
+            "revision": 5,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 6,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 7,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,2"
+            },
+            "origin": "1,1"
+          },
+          {
+            "revision": 8,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-2,-1"
+            }
+          },
+          {
+            "revision": 9,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "walnut-crab",
+              "coordinate": "3,1"
+            }
+          },
+          {
+            "revision": 10,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "coconut-crab",
+              "coordinate": "-1,-3"
+            }
+          },
+          {
+            "revision": 11,
+            "player": 1,
+            "action": {
+              "type": "push",
+              "troopId": "push-scout",
+              "coordinate": "3,1",
+              "destination": "3,0"
+            },
+            "origin": "3,1"
+          },
+          {
+            "revision": 12,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-3,0"
+            },
+            "origin": "-2,-1"
+          },
+          {
+            "revision": 13,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "cinder-heron",
+              "coordinate": "1,3"
+            }
+          },
+          {
+            "revision": 14,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "canyon-ibex",
+              "coordinate": "3,2"
+            },
+            "origin": "1,-1"
+          },
+          {
+            "revision": 15,
+            "player": 1,
+            "action": {
+              "type": "self-defense",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 16,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "coconut-crab",
+              "coordinate": "0,-2"
+            },
+            "origin": "-1,-3"
+          },
+          {
+            "revision": 17,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "1,0"
+            },
+            "origin": "1,3"
+          },
+          {
+            "revision": 18,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "1,-2"
+            }
+          },
+          {
+            "revision": 19,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "war-temple",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 20,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 21,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            },
+            "origin": "1,2"
+          },
+          {
+            "revision": 22,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-1,2"
+            },
+            "origin": "-3,0"
+          },
+          {
+            "revision": 23,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "0,1"
+            },
+            "origin": "1,0"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-29T22:29:47.191Z",
+      "kind": "selection",
+      "player": 2,
+      "nickname": "cagotto8",
+      "state": {
+        "id": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+        "revision": 23,
+        "status": "active",
+        "activePlayer": 2,
+        "players": {
+          "1": "cagotto8",
+          "2": "cagotto8"
+        },
+        "sandbox": true,
+        "sandboxSide": 2,
+        "sandboxFreePlacement": false,
+        "format": 8,
+        "ready": {
+          "1": true,
+          "2": true
+        },
+        "deckChoices": {
+          "1": 0,
+          "2": 0
+        },
+        "selections": {},
+        "targetSelections": {},
+        "decks": {
+          "1": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ],
+          "2": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ]
+        },
+        "units": [
+          {
+            "id": "1:queen-bee",
+            "troopId": "queen-bee",
+            "owner": 1,
+            "coordinate": "1,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "2:squirrel-king",
+            "troopId": "squirrel-king",
+            "owner": 2,
+            "coordinate": "-1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 4
+          },
+          {
+            "id": "1:push-scout",
+            "troopId": "push-scout",
+            "owner": 1,
+            "coordinate": "3,3",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:sahel-porcupine",
+            "troopId": "sahel-porcupine",
+            "owner": 2,
+            "coordinate": "-1,2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "1:walnut-crab",
+            "troopId": "walnut-crab",
+            "owner": 1,
+            "coordinate": "3,0",
+            "permanentDamage": 0,
+            "currentHealth": 2
+          },
+          {
+            "id": "2:coconut-crab",
+            "troopId": "coconut-crab",
+            "owner": 2,
+            "coordinate": "0,-2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "1:cinder-heron",
+            "troopId": "cinder-heron",
+            "owner": 1,
+            "coordinate": "0,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:moss-tortoise",
+            "troopId": "moss-tortoise",
+            "owner": 2,
+            "coordinate": "1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 1
+          }
+        ],
+        "defeatedTroopIds": [
+          "2:canyon-ibex",
+          "1:moss-tortoise",
+          "1:war-temple"
+        ],
+        "effects": [],
+        "bashes": [],
+        "triggerEvents": [],
+        "lastActingTroopId": {
+          "1": "cinder-heron",
+          "2": "sahel-porcupine"
+        },
+        "control": {
+          "p1-start": {
+            "id": "p1-start",
+            "type": "starting",
+            "home": 1,
+            "playerOne": 0.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-start": {
+            "id": "p2-start",
+            "type": "starting",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 4.5,
+            "controller": 2
+          },
+          "p1-middle": {
+            "id": "p1-middle",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 2.5,
+            "playerTwo": 2,
+            "controller": 1
+          },
+          "p2-middle": {
+            "id": "p2-middle",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 2.5,
+            "controller": 2
+          },
+          "p1-side": {
+            "id": "p1-side",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 3.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-side": {
+            "id": "p2-side",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 0.5,
+            "controller": 2
+          },
+          "front": {
+            "id": "front",
+            "type": "front",
+            "playerOne": 2,
+            "playerTwo": 0,
+            "controller": 1
+          }
+        },
+        "events": [
+          {
+            "revision": 1,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 2,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "squirrel-king",
+              "coordinate": "-1,-2"
+            }
+          },
+          {
+            "revision": 3,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "push-scout",
+              "coordinate": "3,3"
+            }
+          },
+          {
+            "revision": 4,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "canyon-ibex",
+              "coordinate": "1,-1"
+            }
+          },
+          {
+            "revision": 5,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 6,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 7,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,2"
+            },
+            "origin": "1,1"
+          },
+          {
+            "revision": 8,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-2,-1"
+            }
+          },
+          {
+            "revision": 9,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "walnut-crab",
+              "coordinate": "3,1"
+            }
+          },
+          {
+            "revision": 10,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "coconut-crab",
+              "coordinate": "-1,-3"
+            }
+          },
+          {
+            "revision": 11,
+            "player": 1,
+            "action": {
+              "type": "push",
+              "troopId": "push-scout",
+              "coordinate": "3,1",
+              "destination": "3,0"
+            },
+            "origin": "3,1"
+          },
+          {
+            "revision": 12,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-3,0"
+            },
+            "origin": "-2,-1"
+          },
+          {
+            "revision": 13,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "cinder-heron",
+              "coordinate": "1,3"
+            }
+          },
+          {
+            "revision": 14,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "canyon-ibex",
+              "coordinate": "3,2"
+            },
+            "origin": "1,-1"
+          },
+          {
+            "revision": 15,
+            "player": 1,
+            "action": {
+              "type": "self-defense",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 16,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "coconut-crab",
+              "coordinate": "0,-2"
+            },
+            "origin": "-1,-3"
+          },
+          {
+            "revision": 17,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "1,0"
+            },
+            "origin": "1,3"
+          },
+          {
+            "revision": 18,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "1,-2"
+            }
+          },
+          {
+            "revision": 19,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "war-temple",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 20,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 21,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            },
+            "origin": "1,2"
+          },
+          {
+            "revision": 22,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-1,2"
+            },
+            "origin": "-3,0"
+          },
+          {
+            "revision": 23,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "0,1"
+            },
+            "origin": "1,0"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-29T22:29:48.180Z",
+      "kind": "selection",
+      "player": 2,
+      "nickname": "cagotto8",
+      "troopId": "coconut-crab",
+      "state": {
+        "id": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+        "revision": 23,
+        "status": "active",
+        "activePlayer": 2,
+        "players": {
+          "1": "cagotto8",
+          "2": "cagotto8"
+        },
+        "sandbox": true,
+        "sandboxSide": 2,
+        "sandboxFreePlacement": false,
+        "format": 8,
+        "ready": {
+          "1": true,
+          "2": true
+        },
+        "deckChoices": {
+          "1": 0,
+          "2": 0
+        },
+        "selections": {
+          "2": "coconut-crab"
+        },
+        "targetSelections": {},
+        "decks": {
+          "1": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ],
+          "2": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ]
+        },
+        "units": [
+          {
+            "id": "1:queen-bee",
+            "troopId": "queen-bee",
+            "owner": 1,
+            "coordinate": "1,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "2:squirrel-king",
+            "troopId": "squirrel-king",
+            "owner": 2,
+            "coordinate": "-1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 4
+          },
+          {
+            "id": "1:push-scout",
+            "troopId": "push-scout",
+            "owner": 1,
+            "coordinate": "3,3",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:sahel-porcupine",
+            "troopId": "sahel-porcupine",
+            "owner": 2,
+            "coordinate": "-1,2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "1:walnut-crab",
+            "troopId": "walnut-crab",
+            "owner": 1,
+            "coordinate": "3,0",
+            "permanentDamage": 0,
+            "currentHealth": 2
+          },
+          {
+            "id": "2:coconut-crab",
+            "troopId": "coconut-crab",
+            "owner": 2,
+            "coordinate": "0,-2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "1:cinder-heron",
+            "troopId": "cinder-heron",
+            "owner": 1,
+            "coordinate": "0,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:moss-tortoise",
+            "troopId": "moss-tortoise",
+            "owner": 2,
+            "coordinate": "1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 1
+          }
+        ],
+        "defeatedTroopIds": [
+          "2:canyon-ibex",
+          "1:moss-tortoise",
+          "1:war-temple"
+        ],
+        "effects": [],
+        "bashes": [],
+        "triggerEvents": [],
+        "lastActingTroopId": {
+          "1": "cinder-heron",
+          "2": "sahel-porcupine"
+        },
+        "control": {
+          "p1-start": {
+            "id": "p1-start",
+            "type": "starting",
+            "home": 1,
+            "playerOne": 0.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-start": {
+            "id": "p2-start",
+            "type": "starting",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 4.5,
+            "controller": 2
+          },
+          "p1-middle": {
+            "id": "p1-middle",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 2.5,
+            "playerTwo": 2,
+            "controller": 1
+          },
+          "p2-middle": {
+            "id": "p2-middle",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 2.5,
+            "controller": 2
+          },
+          "p1-side": {
+            "id": "p1-side",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 3.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-side": {
+            "id": "p2-side",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 0.5,
+            "controller": 2
+          },
+          "front": {
+            "id": "front",
+            "type": "front",
+            "playerOne": 2,
+            "playerTwo": 0,
+            "controller": 1
+          }
+        },
+        "events": [
+          {
+            "revision": 1,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 2,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "squirrel-king",
+              "coordinate": "-1,-2"
+            }
+          },
+          {
+            "revision": 3,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "push-scout",
+              "coordinate": "3,3"
+            }
+          },
+          {
+            "revision": 4,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "canyon-ibex",
+              "coordinate": "1,-1"
+            }
+          },
+          {
+            "revision": 5,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 6,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 7,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,2"
+            },
+            "origin": "1,1"
+          },
+          {
+            "revision": 8,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-2,-1"
+            }
+          },
+          {
+            "revision": 9,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "walnut-crab",
+              "coordinate": "3,1"
+            }
+          },
+          {
+            "revision": 10,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "coconut-crab",
+              "coordinate": "-1,-3"
+            }
+          },
+          {
+            "revision": 11,
+            "player": 1,
+            "action": {
+              "type": "push",
+              "troopId": "push-scout",
+              "coordinate": "3,1",
+              "destination": "3,0"
+            },
+            "origin": "3,1"
+          },
+          {
+            "revision": 12,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-3,0"
+            },
+            "origin": "-2,-1"
+          },
+          {
+            "revision": 13,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "cinder-heron",
+              "coordinate": "1,3"
+            }
+          },
+          {
+            "revision": 14,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "canyon-ibex",
+              "coordinate": "3,2"
+            },
+            "origin": "1,-1"
+          },
+          {
+            "revision": 15,
+            "player": 1,
+            "action": {
+              "type": "self-defense",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 16,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "coconut-crab",
+              "coordinate": "0,-2"
+            },
+            "origin": "-1,-3"
+          },
+          {
+            "revision": 17,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "1,0"
+            },
+            "origin": "1,3"
+          },
+          {
+            "revision": 18,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "1,-2"
+            }
+          },
+          {
+            "revision": 19,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "war-temple",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 20,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 21,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            },
+            "origin": "1,2"
+          },
+          {
+            "revision": 22,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-1,2"
+            },
+            "origin": "-3,0"
+          },
+          {
+            "revision": 23,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "0,1"
+            },
+            "origin": "1,0"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-29T22:29:50.285Z",
+      "kind": "selection",
+      "player": 2,
+      "nickname": "cagotto8",
+      "troopId": "coconut-crab",
+      "state": {
+        "id": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+        "revision": 23,
+        "status": "active",
+        "activePlayer": 2,
+        "players": {
+          "1": "cagotto8",
+          "2": "cagotto8"
+        },
+        "sandbox": true,
+        "sandboxSide": 2,
+        "sandboxFreePlacement": false,
+        "format": 8,
+        "ready": {
+          "1": true,
+          "2": true
+        },
+        "deckChoices": {
+          "1": 0,
+          "2": 0
+        },
+        "selections": {
+          "2": "coconut-crab"
+        },
+        "targetSelections": {},
+        "decks": {
+          "1": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ],
+          "2": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ]
+        },
+        "units": [
+          {
+            "id": "1:queen-bee",
+            "troopId": "queen-bee",
+            "owner": 1,
+            "coordinate": "1,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "2:squirrel-king",
+            "troopId": "squirrel-king",
+            "owner": 2,
+            "coordinate": "-1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 4
+          },
+          {
+            "id": "1:push-scout",
+            "troopId": "push-scout",
+            "owner": 1,
+            "coordinate": "3,3",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:sahel-porcupine",
+            "troopId": "sahel-porcupine",
+            "owner": 2,
+            "coordinate": "-1,2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "1:walnut-crab",
+            "troopId": "walnut-crab",
+            "owner": 1,
+            "coordinate": "3,0",
+            "permanentDamage": 0,
+            "currentHealth": 2
+          },
+          {
+            "id": "2:coconut-crab",
+            "troopId": "coconut-crab",
+            "owner": 2,
+            "coordinate": "0,-2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "1:cinder-heron",
+            "troopId": "cinder-heron",
+            "owner": 1,
+            "coordinate": "0,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:moss-tortoise",
+            "troopId": "moss-tortoise",
+            "owner": 2,
+            "coordinate": "1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 1
+          }
+        ],
+        "defeatedTroopIds": [
+          "2:canyon-ibex",
+          "1:moss-tortoise",
+          "1:war-temple"
+        ],
+        "effects": [],
+        "bashes": [],
+        "triggerEvents": [],
+        "lastActingTroopId": {
+          "1": "cinder-heron",
+          "2": "sahel-porcupine"
+        },
+        "control": {
+          "p1-start": {
+            "id": "p1-start",
+            "type": "starting",
+            "home": 1,
+            "playerOne": 0.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-start": {
+            "id": "p2-start",
+            "type": "starting",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 4.5,
+            "controller": 2
+          },
+          "p1-middle": {
+            "id": "p1-middle",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 2.5,
+            "playerTwo": 2,
+            "controller": 1
+          },
+          "p2-middle": {
+            "id": "p2-middle",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 2.5,
+            "controller": 2
+          },
+          "p1-side": {
+            "id": "p1-side",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 3.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-side": {
+            "id": "p2-side",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 0.5,
+            "controller": 2
+          },
+          "front": {
+            "id": "front",
+            "type": "front",
+            "playerOne": 2,
+            "playerTwo": 0,
+            "controller": 1
+          }
+        },
+        "events": [
+          {
+            "revision": 1,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 2,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "squirrel-king",
+              "coordinate": "-1,-2"
+            }
+          },
+          {
+            "revision": 3,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "push-scout",
+              "coordinate": "3,3"
+            }
+          },
+          {
+            "revision": 4,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "canyon-ibex",
+              "coordinate": "1,-1"
+            }
+          },
+          {
+            "revision": 5,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 6,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 7,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,2"
+            },
+            "origin": "1,1"
+          },
+          {
+            "revision": 8,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-2,-1"
+            }
+          },
+          {
+            "revision": 9,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "walnut-crab",
+              "coordinate": "3,1"
+            }
+          },
+          {
+            "revision": 10,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "coconut-crab",
+              "coordinate": "-1,-3"
+            }
+          },
+          {
+            "revision": 11,
+            "player": 1,
+            "action": {
+              "type": "push",
+              "troopId": "push-scout",
+              "coordinate": "3,1",
+              "destination": "3,0"
+            },
+            "origin": "3,1"
+          },
+          {
+            "revision": 12,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-3,0"
+            },
+            "origin": "-2,-1"
+          },
+          {
+            "revision": 13,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "cinder-heron",
+              "coordinate": "1,3"
+            }
+          },
+          {
+            "revision": 14,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "canyon-ibex",
+              "coordinate": "3,2"
+            },
+            "origin": "1,-1"
+          },
+          {
+            "revision": 15,
+            "player": 1,
+            "action": {
+              "type": "self-defense",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 16,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "coconut-crab",
+              "coordinate": "0,-2"
+            },
+            "origin": "-1,-3"
+          },
+          {
+            "revision": 17,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "1,0"
+            },
+            "origin": "1,3"
+          },
+          {
+            "revision": 18,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "1,-2"
+            }
+          },
+          {
+            "revision": 19,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "war-temple",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 20,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 21,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            },
+            "origin": "1,2"
+          },
+          {
+            "revision": 22,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-1,2"
+            },
+            "origin": "-3,0"
+          },
+          {
+            "revision": 23,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "0,1"
+            },
+            "origin": "1,0"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-29T22:29:51.947Z",
+      "kind": "selection",
+      "player": 2,
+      "nickname": "cagotto8",
+      "troopId": "coconut-crab",
+      "target": {
+        "troopId": "coconut-crab",
+        "type": "cannon",
+        "coordinate": "0,1"
+      },
+      "state": {
+        "id": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+        "revision": 23,
+        "status": "active",
+        "activePlayer": 2,
+        "players": {
+          "1": "cagotto8",
+          "2": "cagotto8"
+        },
+        "sandbox": true,
+        "sandboxSide": 2,
+        "sandboxFreePlacement": false,
+        "format": 8,
+        "ready": {
+          "1": true,
+          "2": true
+        },
+        "deckChoices": {
+          "1": 0,
+          "2": 0
+        },
+        "selections": {
+          "2": "coconut-crab"
+        },
+        "targetSelections": {
+          "2": {
+            "troopId": "coconut-crab",
+            "type": "cannon",
+            "coordinate": "0,1"
+          }
+        },
+        "decks": {
+          "1": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ],
+          "2": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ]
+        },
+        "units": [
+          {
+            "id": "1:queen-bee",
+            "troopId": "queen-bee",
+            "owner": 1,
+            "coordinate": "1,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "2:squirrel-king",
+            "troopId": "squirrel-king",
+            "owner": 2,
+            "coordinate": "-1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 4
+          },
+          {
+            "id": "1:push-scout",
+            "troopId": "push-scout",
+            "owner": 1,
+            "coordinate": "3,3",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:sahel-porcupine",
+            "troopId": "sahel-porcupine",
+            "owner": 2,
+            "coordinate": "-1,2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "1:walnut-crab",
+            "troopId": "walnut-crab",
+            "owner": 1,
+            "coordinate": "3,0",
+            "permanentDamage": 0,
+            "currentHealth": 2
+          },
+          {
+            "id": "2:coconut-crab",
+            "troopId": "coconut-crab",
+            "owner": 2,
+            "coordinate": "0,-2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "1:cinder-heron",
+            "troopId": "cinder-heron",
+            "owner": 1,
+            "coordinate": "0,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:moss-tortoise",
+            "troopId": "moss-tortoise",
+            "owner": 2,
+            "coordinate": "1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 1
+          }
+        ],
+        "defeatedTroopIds": [
+          "2:canyon-ibex",
+          "1:moss-tortoise",
+          "1:war-temple"
+        ],
+        "effects": [],
+        "bashes": [],
+        "triggerEvents": [],
+        "lastActingTroopId": {
+          "1": "cinder-heron",
+          "2": "sahel-porcupine"
+        },
+        "control": {
+          "p1-start": {
+            "id": "p1-start",
+            "type": "starting",
+            "home": 1,
+            "playerOne": 0.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-start": {
+            "id": "p2-start",
+            "type": "starting",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 4.5,
+            "controller": 2
+          },
+          "p1-middle": {
+            "id": "p1-middle",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 2.5,
+            "playerTwo": 2,
+            "controller": 1
+          },
+          "p2-middle": {
+            "id": "p2-middle",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 2.5,
+            "controller": 2
+          },
+          "p1-side": {
+            "id": "p1-side",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 3.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-side": {
+            "id": "p2-side",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 0.5,
+            "controller": 2
+          },
+          "front": {
+            "id": "front",
+            "type": "front",
+            "playerOne": 2,
+            "playerTwo": 0,
+            "controller": 1
+          }
+        },
+        "events": [
+          {
+            "revision": 1,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 2,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "squirrel-king",
+              "coordinate": "-1,-2"
+            }
+          },
+          {
+            "revision": 3,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "push-scout",
+              "coordinate": "3,3"
+            }
+          },
+          {
+            "revision": 4,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "canyon-ibex",
+              "coordinate": "1,-1"
+            }
+          },
+          {
+            "revision": 5,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 6,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 7,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,2"
+            },
+            "origin": "1,1"
+          },
+          {
+            "revision": 8,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-2,-1"
+            }
+          },
+          {
+            "revision": 9,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "walnut-crab",
+              "coordinate": "3,1"
+            }
+          },
+          {
+            "revision": 10,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "coconut-crab",
+              "coordinate": "-1,-3"
+            }
+          },
+          {
+            "revision": 11,
+            "player": 1,
+            "action": {
+              "type": "push",
+              "troopId": "push-scout",
+              "coordinate": "3,1",
+              "destination": "3,0"
+            },
+            "origin": "3,1"
+          },
+          {
+            "revision": 12,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-3,0"
+            },
+            "origin": "-2,-1"
+          },
+          {
+            "revision": 13,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "cinder-heron",
+              "coordinate": "1,3"
+            }
+          },
+          {
+            "revision": 14,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "canyon-ibex",
+              "coordinate": "3,2"
+            },
+            "origin": "1,-1"
+          },
+          {
+            "revision": 15,
+            "player": 1,
+            "action": {
+              "type": "self-defense",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 16,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "coconut-crab",
+              "coordinate": "0,-2"
+            },
+            "origin": "-1,-3"
+          },
+          {
+            "revision": 17,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "1,0"
+            },
+            "origin": "1,3"
+          },
+          {
+            "revision": 18,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "1,-2"
+            }
+          },
+          {
+            "revision": 19,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "war-temple",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 20,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 21,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            },
+            "origin": "1,2"
+          },
+          {
+            "revision": 22,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-1,2"
+            },
+            "origin": "-3,0"
+          },
+          {
+            "revision": 23,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "0,1"
+            },
+            "origin": "1,0"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-29T22:31:55.032Z",
+      "kind": "selection",
+      "player": 2,
+      "nickname": "cagotto8",
+      "state": {
+        "id": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+        "revision": 23,
+        "status": "active",
+        "activePlayer": 2,
+        "players": {
+          "1": "cagotto8",
+          "2": "cagotto8"
+        },
+        "sandbox": true,
+        "sandboxSide": 2,
+        "sandboxFreePlacement": false,
+        "format": 8,
+        "ready": {
+          "1": true,
+          "2": true
+        },
+        "deckChoices": {
+          "1": 0,
+          "2": 0
+        },
+        "selections": {},
+        "targetSelections": {},
+        "decks": {
+          "1": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ],
+          "2": [
+            "queen-bee",
+            "bramble-empress",
+            "tiger-queen",
+            "ember-salamander",
+            "moss-tortoise",
+            "steppe-lynx",
+            "canyon-ibex",
+            "marsh-badger",
+            "dune-scorpion",
+            "snowy-owl",
+            "squirrel-king",
+            "cave-viper",
+            "river-otter",
+            "coastal-heron",
+            "desert-fox",
+            "iron-armadillo",
+            "volcanic-gecko",
+            "highland-hawk",
+            "ironscale-rhino",
+            "sahel-porcupine",
+            "alps-lone-wolf",
+            "canyon-hawk",
+            "cinder-heron",
+            "walnut-crab",
+            "coconut-crab",
+            "push-warden",
+            "push-scout",
+            "spring-temple",
+            "oracle-temple",
+            "water-temple",
+            "war-temple"
+          ]
+        },
+        "units": [
+          {
+            "id": "1:queen-bee",
+            "troopId": "queen-bee",
+            "owner": 1,
+            "coordinate": "1,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "2:squirrel-king",
+            "troopId": "squirrel-king",
+            "owner": 2,
+            "coordinate": "-1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 4
+          },
+          {
+            "id": "1:push-scout",
+            "troopId": "push-scout",
+            "owner": 1,
+            "coordinate": "3,3",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:sahel-porcupine",
+            "troopId": "sahel-porcupine",
+            "owner": 2,
+            "coordinate": "-1,2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "1:walnut-crab",
+            "troopId": "walnut-crab",
+            "owner": 1,
+            "coordinate": "3,0",
+            "permanentDamage": 0,
+            "currentHealth": 2
+          },
+          {
+            "id": "2:coconut-crab",
+            "troopId": "coconut-crab",
+            "owner": 2,
+            "coordinate": "0,-2",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 1
+          },
+          {
+            "id": "1:cinder-heron",
+            "troopId": "cinder-heron",
+            "owner": 1,
+            "coordinate": "0,1",
+            "permanentDamage": 0,
+            "upgrades": [],
+            "currentHealth": 2
+          },
+          {
+            "id": "2:moss-tortoise",
+            "troopId": "moss-tortoise",
+            "owner": 2,
+            "coordinate": "1,-2",
+            "permanentDamage": 0,
+            "currentHealth": 1
+          }
+        ],
+        "defeatedTroopIds": [
+          "2:canyon-ibex",
+          "1:moss-tortoise",
+          "1:war-temple"
+        ],
+        "effects": [],
+        "bashes": [],
+        "triggerEvents": [],
+        "lastActingTroopId": {
+          "1": "cinder-heron",
+          "2": "sahel-porcupine"
+        },
+        "control": {
+          "p1-start": {
+            "id": "p1-start",
+            "type": "starting",
+            "home": 1,
+            "playerOne": 0.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-start": {
+            "id": "p2-start",
+            "type": "starting",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 4.5,
+            "controller": 2
+          },
+          "p1-middle": {
+            "id": "p1-middle",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 2.5,
+            "playerTwo": 2,
+            "controller": 1
+          },
+          "p2-middle": {
+            "id": "p2-middle",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 2.5,
+            "controller": 2
+          },
+          "p1-side": {
+            "id": "p1-side",
+            "type": "intermediate",
+            "home": 1,
+            "playerOne": 3.5,
+            "playerTwo": 0,
+            "controller": 1
+          },
+          "p2-side": {
+            "id": "p2-side",
+            "type": "intermediate",
+            "home": 2,
+            "playerOne": 0,
+            "playerTwo": 0.5,
+            "controller": 2
+          },
+          "front": {
+            "id": "front",
+            "type": "front",
+            "playerOne": 2,
+            "playerTwo": 0,
+            "controller": 1
+          }
+        },
+        "events": [
+          {
+            "revision": 1,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 2,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "squirrel-king",
+              "coordinate": "-1,-2"
+            }
+          },
+          {
+            "revision": 3,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "push-scout",
+              "coordinate": "3,3"
+            }
+          },
+          {
+            "revision": 4,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "canyon-ibex",
+              "coordinate": "1,-1"
+            }
+          },
+          {
+            "revision": 5,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 6,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "1,1"
+            }
+          },
+          {
+            "revision": 7,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,2"
+            },
+            "origin": "1,1"
+          },
+          {
+            "revision": 8,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-2,-1"
+            }
+          },
+          {
+            "revision": 9,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "walnut-crab",
+              "coordinate": "3,1"
+            }
+          },
+          {
+            "revision": 10,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "coconut-crab",
+              "coordinate": "-1,-3"
+            }
+          },
+          {
+            "revision": 11,
+            "player": 1,
+            "action": {
+              "type": "push",
+              "troopId": "push-scout",
+              "coordinate": "3,1",
+              "destination": "3,0"
+            },
+            "origin": "3,1"
+          },
+          {
+            "revision": 12,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-3,0"
+            },
+            "origin": "-2,-1"
+          },
+          {
+            "revision": 13,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "cinder-heron",
+              "coordinate": "1,3"
+            }
+          },
+          {
+            "revision": 14,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "canyon-ibex",
+              "coordinate": "3,2"
+            },
+            "origin": "1,-1"
+          },
+          {
+            "revision": 15,
+            "player": 1,
+            "action": {
+              "type": "self-defense",
+              "troopId": "moss-tortoise",
+              "coordinate": "3,2"
+            }
+          },
+          {
+            "revision": 16,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "coconut-crab",
+              "coordinate": "0,-2"
+            },
+            "origin": "-1,-3"
+          },
+          {
+            "revision": 17,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "1,0"
+            },
+            "origin": "1,3"
+          },
+          {
+            "revision": 18,
+            "player": 2,
+            "action": {
+              "type": "deploy",
+              "troopId": "moss-tortoise",
+              "coordinate": "1,-2"
+            }
+          },
+          {
+            "revision": 19,
+            "player": 1,
+            "action": {
+              "type": "deploy",
+              "troopId": "war-temple",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 20,
+            "player": 2,
+            "action": {
+              "type": "magic",
+              "troopId": "squirrel-king",
+              "coordinate": "2,0"
+            }
+          },
+          {
+            "revision": 21,
+            "player": 1,
+            "action": {
+              "type": "move",
+              "troopId": "queen-bee",
+              "coordinate": "1,1"
+            },
+            "origin": "1,2"
+          },
+          {
+            "revision": 22,
+            "player": 2,
+            "action": {
+              "type": "move",
+              "troopId": "sahel-porcupine",
+              "coordinate": "-1,2"
+            },
+            "origin": "-3,0"
+          },
+          {
+            "revision": 23,
+            "player": 1,
+            "action": {
+              "type": "fly",
+              "troopId": "cinder-heron",
+              "coordinate": "0,1"
+            },
+            "origin": "1,0"
+          }
+        ]
+      }
+    }
+  ],
+  "finalState": {
+    "id": "e088e5e0-954e-4de3-9b91-324c50f8cadc",
+    "revision": 23,
+    "status": "active",
+    "activePlayer": 2,
+    "players": {
+      "1": "cagotto8",
+      "2": "cagotto8"
+    },
+    "sandbox": true,
+    "sandboxSide": 2,
+    "sandboxFreePlacement": false,
+    "format": 8,
+    "ready": {
+      "1": true,
+      "2": true
+    },
+    "deckChoices": {
+      "1": 0,
+      "2": 0
+    },
+    "selections": {},
+    "targetSelections": {},
+    "decks": {
+      "1": [
+        "queen-bee",
+        "bramble-empress",
+        "tiger-queen",
+        "ember-salamander",
+        "moss-tortoise",
+        "steppe-lynx",
+        "canyon-ibex",
+        "marsh-badger",
+        "dune-scorpion",
+        "snowy-owl",
+        "squirrel-king",
+        "cave-viper",
+        "river-otter",
+        "coastal-heron",
+        "desert-fox",
+        "iron-armadillo",
+        "volcanic-gecko",
+        "highland-hawk",
+        "ironscale-rhino",
+        "sahel-porcupine",
+        "alps-lone-wolf",
+        "canyon-hawk",
+        "cinder-heron",
+        "walnut-crab",
+        "coconut-crab",
+        "push-warden",
+        "push-scout",
+        "spring-temple",
+        "oracle-temple",
+        "water-temple",
+        "war-temple"
+      ],
+      "2": [
+        "queen-bee",
+        "bramble-empress",
+        "tiger-queen",
+        "ember-salamander",
+        "moss-tortoise",
+        "steppe-lynx",
+        "canyon-ibex",
+        "marsh-badger",
+        "dune-scorpion",
+        "snowy-owl",
+        "squirrel-king",
+        "cave-viper",
+        "river-otter",
+        "coastal-heron",
+        "desert-fox",
+        "iron-armadillo",
+        "volcanic-gecko",
+        "highland-hawk",
+        "ironscale-rhino",
+        "sahel-porcupine",
+        "alps-lone-wolf",
+        "canyon-hawk",
+        "cinder-heron",
+        "walnut-crab",
+        "coconut-crab",
+        "push-warden",
+        "push-scout",
+        "spring-temple",
+        "oracle-temple",
+        "water-temple",
+        "war-temple"
+      ]
+    },
+    "units": [
+      {
+        "id": "1:queen-bee",
+        "troopId": "queen-bee",
+        "owner": 1,
+        "coordinate": "1,1",
+        "permanentDamage": 0,
+        "upgrades": [],
+        "currentHealth": 1
+      },
+      {
+        "id": "2:squirrel-king",
+        "troopId": "squirrel-king",
+        "owner": 2,
+        "coordinate": "-1,-2",
+        "permanentDamage": 0,
+        "currentHealth": 4
+      },
+      {
+        "id": "1:push-scout",
+        "troopId": "push-scout",
+        "owner": 1,
+        "coordinate": "3,3",
+        "permanentDamage": 0,
+        "upgrades": [],
+        "currentHealth": 2
+      },
+      {
+        "id": "2:sahel-porcupine",
+        "troopId": "sahel-porcupine",
+        "owner": 2,
+        "coordinate": "-1,2",
+        "permanentDamage": 0,
+        "upgrades": [],
+        "currentHealth": 2
+      },
+      {
+        "id": "1:walnut-crab",
+        "troopId": "walnut-crab",
+        "owner": 1,
+        "coordinate": "3,0",
+        "permanentDamage": 0,
+        "currentHealth": 2
+      },
+      {
+        "id": "2:coconut-crab",
+        "troopId": "coconut-crab",
+        "owner": 2,
+        "coordinate": "0,-2",
+        "permanentDamage": 0,
+        "upgrades": [],
+        "currentHealth": 1
+      },
+      {
+        "id": "1:cinder-heron",
+        "troopId": "cinder-heron",
+        "owner": 1,
+        "coordinate": "0,1",
+        "permanentDamage": 0,
+        "upgrades": [],
+        "currentHealth": 2
+      },
+      {
+        "id": "2:moss-tortoise",
+        "troopId": "moss-tortoise",
+        "owner": 2,
+        "coordinate": "1,-2",
+        "permanentDamage": 0,
+        "currentHealth": 1
+      }
+    ],
+    "defeatedTroopIds": [
+      "2:canyon-ibex",
+      "1:moss-tortoise",
+      "1:war-temple"
+    ],
+    "effects": [],
+    "bashes": [],
+    "triggerEvents": [],
+    "lastActingTroopId": {
+      "1": "cinder-heron",
+      "2": "sahel-porcupine"
+    },
+    "control": {
+      "p1-start": {
+        "id": "p1-start",
+        "type": "starting",
+        "home": 1,
+        "playerOne": 0.5,
+        "playerTwo": 0,
+        "controller": 1
+      },
+      "p2-start": {
+        "id": "p2-start",
+        "type": "starting",
+        "home": 2,
+        "playerOne": 0,
+        "playerTwo": 4.5,
+        "controller": 2
+      },
+      "p1-middle": {
+        "id": "p1-middle",
+        "type": "intermediate",
+        "home": 1,
+        "playerOne": 2.5,
+        "playerTwo": 2,
+        "controller": 1
+      },
+      "p2-middle": {
+        "id": "p2-middle",
+        "type": "intermediate",
+        "home": 2,
+        "playerOne": 0,
+        "playerTwo": 2.5,
+        "controller": 2
+      },
+      "p1-side": {
+        "id": "p1-side",
+        "type": "intermediate",
+        "home": 1,
+        "playerOne": 3.5,
+        "playerTwo": 0,
+        "controller": 1
+      },
+      "p2-side": {
+        "id": "p2-side",
+        "type": "intermediate",
+        "home": 2,
+        "playerOne": 0,
+        "playerTwo": 0.5,
+        "controller": 2
+      },
+      "front": {
+        "id": "front",
+        "type": "front",
+        "playerOne": 2,
+        "playerTwo": 0,
+        "controller": 1
+      }
+    },
+    "events": [
+      {
+        "revision": 1,
+        "player": 1,
+        "action": {
+          "type": "deploy",
+          "troopId": "queen-bee",
+          "coordinate": "1,1"
+        }
+      },
+      {
+        "revision": 2,
+        "player": 2,
+        "action": {
+          "type": "deploy",
+          "troopId": "squirrel-king",
+          "coordinate": "-1,-2"
+        }
+      },
+      {
+        "revision": 3,
+        "player": 1,
+        "action": {
+          "type": "deploy",
+          "troopId": "push-scout",
+          "coordinate": "3,3"
+        }
+      },
+      {
+        "revision": 4,
+        "player": 2,
+        "action": {
+          "type": "deploy",
+          "troopId": "canyon-ibex",
+          "coordinate": "1,-1"
+        }
+      },
+      {
+        "revision": 5,
+        "player": 1,
+        "action": {
+          "type": "deploy",
+          "troopId": "moss-tortoise",
+          "coordinate": "3,2"
+        }
+      },
+      {
+        "revision": 6,
+        "player": 2,
+        "action": {
+          "type": "magic",
+          "troopId": "squirrel-king",
+          "coordinate": "1,1"
+        }
+      },
+      {
+        "revision": 7,
+        "player": 1,
+        "action": {
+          "type": "move",
+          "troopId": "queen-bee",
+          "coordinate": "1,2"
+        },
+        "origin": "1,1"
+      },
+      {
+        "revision": 8,
+        "player": 2,
+        "action": {
+          "type": "deploy",
+          "troopId": "sahel-porcupine",
+          "coordinate": "-2,-1"
+        }
+      },
+      {
+        "revision": 9,
+        "player": 1,
+        "action": {
+          "type": "deploy",
+          "troopId": "walnut-crab",
+          "coordinate": "3,1"
+        }
+      },
+      {
+        "revision": 10,
+        "player": 2,
+        "action": {
+          "type": "deploy",
+          "troopId": "coconut-crab",
+          "coordinate": "-1,-3"
+        }
+      },
+      {
+        "revision": 11,
+        "player": 1,
+        "action": {
+          "type": "push",
+          "troopId": "push-scout",
+          "coordinate": "3,1",
+          "destination": "3,0"
+        },
+        "origin": "3,1"
+      },
+      {
+        "revision": 12,
+        "player": 2,
+        "action": {
+          "type": "move",
+          "troopId": "sahel-porcupine",
+          "coordinate": "-3,0"
+        },
+        "origin": "-2,-1"
+      },
+      {
+        "revision": 13,
+        "player": 1,
+        "action": {
+          "type": "deploy",
+          "troopId": "cinder-heron",
+          "coordinate": "1,3"
+        }
+      },
+      {
+        "revision": 14,
+        "player": 2,
+        "action": {
+          "type": "move",
+          "troopId": "canyon-ibex",
+          "coordinate": "3,2"
+        },
+        "origin": "1,-1"
+      },
+      {
+        "revision": 15,
+        "player": 1,
+        "action": {
+          "type": "self-defense",
+          "troopId": "moss-tortoise",
+          "coordinate": "3,2"
+        }
+      },
+      {
+        "revision": 16,
+        "player": 2,
+        "action": {
+          "type": "move",
+          "troopId": "coconut-crab",
+          "coordinate": "0,-2"
+        },
+        "origin": "-1,-3"
+      },
+      {
+        "revision": 17,
+        "player": 1,
+        "action": {
+          "type": "fly",
+          "troopId": "cinder-heron",
+          "coordinate": "1,0"
+        },
+        "origin": "1,3"
+      },
+      {
+        "revision": 18,
+        "player": 2,
+        "action": {
+          "type": "deploy",
+          "troopId": "moss-tortoise",
+          "coordinate": "1,-2"
+        }
+      },
+      {
+        "revision": 19,
+        "player": 1,
+        "action": {
+          "type": "deploy",
+          "troopId": "war-temple",
+          "coordinate": "2,0"
+        }
+      },
+      {
+        "revision": 20,
+        "player": 2,
+        "action": {
+          "type": "magic",
+          "troopId": "squirrel-king",
+          "coordinate": "2,0"
+        }
+      },
+      {
+        "revision": 21,
+        "player": 1,
+        "action": {
+          "type": "move",
+          "troopId": "queen-bee",
+          "coordinate": "1,1"
+        },
+        "origin": "1,2"
+      },
+      {
+        "revision": 22,
+        "player": 2,
+        "action": {
+          "type": "move",
+          "troopId": "sahel-porcupine",
+          "coordinate": "-1,2"
+        },
+        "origin": "-3,0"
+      },
+      {
+        "revision": 23,
+        "player": 1,
+        "action": {
+          "type": "fly",
+          "troopId": "cinder-heron",
+          "coordinate": "0,1"
+        },
+        "origin": "1,0"
+      }
+    ]
+  }
+}
