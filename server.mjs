@@ -3,7 +3,7 @@ import { access, mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:
 import { createServer } from 'node:http';
 import { extname, normalize, resolve, sep } from 'node:path';
 import { WebSocketServer } from 'ws';
-import { troopSeeds } from './game/cards.js';
+import { troopSeeds } from './dist/game/cards.js';
 import { MatchStore } from './server/match-store.mjs';
 
 const root = resolve(process.cwd());

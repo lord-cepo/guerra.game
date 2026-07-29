@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { applyGameAction, controlSummary, createGameState, unitId } from '../game/engine.js';
+import { applyGameAction, controlSummary, createGameState, unitId } from '../dist/game/engine.js';
 
 function isBoardCoordinate(coordinate) {
   if (typeof coordinate !== 'string') return false;

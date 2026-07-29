@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { troopSeeds } from '../game/cards.js';
+import { troopSeeds } from '../dist/game/cards.js';
 import { MatchStore } from '../server/match-store.mjs';
 
 const legacyCardNames = {

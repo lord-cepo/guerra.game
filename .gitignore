@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# TypeScript/build output
+dist/
+build/
+hex-grid.js
+game/*.js
+*.tsbuildinfo
+
+# Tests
+coverage/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local game state and diagnostics
+data/runtime.json
+data/users.json
+data/sandboxes/
+data/match-logs/
+
+# Operating-system files
+.DS_Store
+Thumbs.db

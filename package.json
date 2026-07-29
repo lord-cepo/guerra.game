@@ -4,6 +4,7 @@
     "build": "tsc --project tsconfig.json",
     "check": "tsc --project tsconfig.json --noEmit",
     "test": "npm run build && node --test tests",
+    "prestart": "npm run build",
     "start": "node server.mjs"
   },
   "devDependencies": {

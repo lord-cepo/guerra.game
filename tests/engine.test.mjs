@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { troopSeeds } from '../game/cards.js';
-import { applyGameAction, combatBreakdown, controlSummary, createGameState, dispatchTrigger, registerPassive, registerTimedPassive, runTimedPassives } from '../game/engine.js';
+import { troopSeeds } from '../dist/game/cards.js';
+import { applyGameAction, combatBreakdown, controlSummary, createGameState, dispatchTrigger, registerPassive, registerTimedPassive, runTimedPassives } from '../dist/game/engine.js';
 
 // The original tests predate the named card catalogue. Keep their scenario
 // labels while resolving each one to the equivalent current card.
