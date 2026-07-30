@@ -5,70 +5,172 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Axial Hex Grid</title>
   <style>
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+      --surface: #172033;
+      --surface-raised: #1e293b;
+      --line: #475569;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
+      min-height: 100dvh;
       display: grid;
       place-items: center;
-      background: #111827;
-      color: #e5e7eb;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% -20%, rgb(59 130 246 / .14), transparent 42rem),
+        linear-gradient(145deg, #0b1120, #111827 55%, #0f172a);
+      color: var(--text);
       font: 16px system-ui, sans-serif;
     }
     body.local-player-one { --action-colour: #ef4444; --action-fill: rgb(239 68 68 / .20); }
     body.local-player-two { --action-colour: #3b82f6; --action-fill: rgb(59 130 246 / .20); }
-    main { width: min(99vw, 1900px); }
+    main {
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto auto;
+      width: min(100vw, 1900px);
+      height: 100vh;
+      height: 100dvh;
+      min-height: 0;
+      padding: clamp(.4rem, 1vw, .75rem);
+    }
     p { color: #9ca3af; margin: 0 0 1rem; }
     .game-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-      gap: 30px;
-      align-items: start;
+      grid-template-columns:
+        minmax(12rem, 1fr)
+        minmax(22rem, min(50vw, calc((100dvh - 5rem) * .8983)))
+        minmax(12rem, 1fr);
+      gap: clamp(.55rem, 1.5vw, 1.6rem);
+      align-items: stretch;
+      min-height: 0;
+      height: 100%;
     }
     .board-area {
+      position: relative;
       display: grid;
       place-items: center;
-      height: calc(100vh - 4rem);
+      align-self: center;
+      width: 100%;
+      height: auto;
+      max-height: 100%;
       aspect-ratio: 530 / 590;
+      border: 1px solid rgb(71 85 105 / .35);
+      border-radius: 1rem;
+      background: radial-gradient(circle, rgb(30 41 59 / .38), rgb(15 23 42 / .08) 68%);
+      box-shadow: inset 0 0 3rem rgb(15 23 42 / .34);
     }
     svg {
       width: 100%;
       height: 100%;
       display: block;
     }
-    /* Blue sees their home side at the bottom.  Icons and text are
-       counter-rotated around their individual hex centres in TypeScript. */
-    body.local-player-two #board { transform: rotate(180deg); transform-box: view-box; transform-origin: center; }
-    .troop-tray { padding-top: 2rem; }
+    /* Ownership is spatially stable: Blue is always left/bottom and Red is
+       always right/top. Icons and text are counter-rotated in TypeScript. */
+    body.board-player-two #board { transform: rotate(180deg); transform-box: view-box; transform-origin: center; }
+    .board-region-key {
+      position: absolute;
+      top: .55rem;
+      left: .55rem;
+      z-index: 2;
+      display: grid;
+      gap: .22rem;
+      padding: .35rem .45rem;
+      border: 1px solid rgb(100 116 139 / .38);
+      border-radius: .45rem;
+      background: rgb(15 23 42 / .76);
+      color: #cbd5e1;
+      font-size: .61rem;
+      font-weight: 750;
+      letter-spacing: .035em;
+      line-height: 1;
+      pointer-events: none;
+    }
+    .board-region-key span { display: flex; align-items: center; gap: .32rem; }
+    .board-region-key span::before {
+      content: '';
+      width: .85rem;
+      height: .62rem;
+      border: 1px solid rgb(203 213 225 / .42);
+      border-radius: .14rem;
+    }
+    .board-region-key .starting::before {
+      background: repeating-linear-gradient(135deg, rgb(148 163 184 / .28) 0 2px, rgb(51 65 85 / .16) 2px 5px);
+    }
+    .board-region-key .intermediate::before {
+      background: radial-gradient(circle, rgb(203 213 225 / .42) 0 1px, transparent 1.5px) 0 0 / 5px 5px, rgb(51 65 85 / .18);
+    }
+    .board-region-key .front-line::before {
+      background: repeating-linear-gradient(0deg, rgb(203 213 225 / .3) 0 1px, rgb(51 65 85 / .14) 1px 4px);
+    }
+    .troop-tray {
+      min-width: 0;
+      min-height: 0;
+      padding-top: 0;
+      overflow: hidden;
+    }
     .card-list {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-template-rows: repeat(8, minmax(0, 1fr));
-      height: min(800px, calc(100vh - 2rem));
+      grid-template-columns: 1fr;
+      grid-auto-rows: minmax(5.15rem, auto);
+      align-content: start;
+      height: 100%;
+      min-height: 0;
       gap: .5rem;
+      overflow-y: auto;
+      padding: .2rem .35rem .2rem .1rem;
+      scrollbar-gutter: stable;
     }
-    .card-list.deck-builder { grid-template-rows: repeat(5, minmax(0, 1fr)); }
+    .game-layout.deck-building .card-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .game-layout.deck-building { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     .game-layout.deck-building .board-area { display: none; }
     .game-layout.deck-building .troop-tray { padding-top: 0; }
     .game-layout.deck-building .card-list {
       grid-template-rows: none;
       grid-auto-rows: minmax(5.25rem, auto);
-      height: calc(100vh - 5rem);
+      height: 100%;
       overflow-y: auto;
       align-content: start;
       padding-right: .35rem;
     }
-    /* Sandbox uses the same full-card, scrollable catalogue treatment while
+    /* Playground uses the same full-card, scrollable catalogue treatment while
        keeping the board visible between the two trays. */
     .card-list.sandbox-catalog {
       grid-template-rows: none;
       grid-auto-rows: minmax(5.25rem, auto);
-      height: calc(100vh - 5rem);
+      height: 100%;
       overflow-y: auto;
       align-content: start;
       padding-right: .35rem;
+    }
+    .card-list.grouped-card-list { grid-auto-rows: max-content; }
+    .game-layout.deck-building .card-list.grouped-card-list { grid-auto-rows: max-content; }
+    .card-role-group {
+      display: grid;
+      grid-column: 1 / -1;
+      gap: .45rem;
+      min-width: 0;
+    }
+    .card-role-heading {
+      margin: .15rem .4rem 0;
+      color: #94a3b8;
+      font-size: .7rem;
+      font-weight: 800;
+      letter-spacing: .13em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+    .card-role-cards {
+      display: grid;
+      gap: .5rem;
+      min-width: 0;
+    }
+    .game-layout.deck-building .grouped-card-list .card-role-cards {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .troop-card.deck-empty { display: grid; place-items: center; border-style: dashed; color: #94a3b8; cursor: default; }
     .troop-card.database-card { cursor: grab; }
@@ -76,24 +178,25 @@
       position: relative;
       overflow: hidden;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 4rem;
-      grid-template-rows: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) 4.5rem;
       width: 100%;
-      min-height: 0;
+      min-height: 5.15rem;
       padding: 0;
       border: 1px solid #334155;
-      border-radius: .5rem;
-      background: #172033;
+      border-radius: .65rem;
+      background: linear-gradient(145deg, #1e293b, #131c2e);
       color: #e2e8f0;
       text-align: left;
       font: inherit;
       cursor: pointer;
+      box-shadow: 0 .18rem .55rem rgb(0 0 0 / .18);
+      transition: border-color .14s ease, background .14s ease, box-shadow .14s ease, opacity .14s ease, transform .14s ease;
     }
     .troop-card::after {
       content: '';
       position: absolute;
       top: 0;
-      right: 4rem;
+      right: 4.5rem;
       bottom: 0;
       border-left: 1px solid #64748b;
       pointer-events: none;
@@ -114,15 +217,49 @@
     .player-one-tray .troop-card.deployment-starting::before { background: #b91c1c; }
     .player-one-tray .troop-card.deployment-intermediate::before { background: #f87171; }
     .player-one-tray .troop-card.deployment-both::before { background: linear-gradient(#b91c1c 50%, #f87171 50%); }
-    .troop-card:hover, .troop-card:focus-visible { border-color: #e2e8f0; background: #334155; outline: none; }
+    .troop-card:hover, .troop-card:focus-visible {
+      border-color: #e2e8f0;
+      background: linear-gradient(145deg, #334155, #1e293b);
+      box-shadow: 0 .35rem 1rem rgb(0 0 0 / .28);
+      outline: none;
+      transform: translateY(-1px);
+    }
     .troop-card.unavailable-card { cursor: default; opacity: .45; }
     .troop-card.unavailable-card:hover { border-color: inherit; background: inherit; }
-    .troop-card.selected-card { box-shadow: none; }
-    .troop-card strong {
+    .troop-card.undeployable-card {
+      opacity: .4;
+      filter: saturate(.45);
+      cursor: not-allowed;
+    }
+    .troop-card.undeployable-card:hover {
+      border-color: #334155;
+      background: linear-gradient(145deg, #1e293b, #131c2e);
+      box-shadow: 0 .18rem .55rem rgb(0 0 0 / .18);
+      transform: none;
+    }
+    .troop-card.selected-card {
+      background: linear-gradient(145deg, #3a475c, #202c40);
+      box-shadow: 0 .35rem 1rem rgb(0 0 0 / .3);
+      transform: translateY(-1px);
+    }
+    .troop-card.inactive-player-card {
+      opacity: .36;
+      filter: saturate(.45);
+      cursor: not-allowed;
+    }
+    .troop-card.inactive-player-card:hover { border-color: inherit; background: linear-gradient(145deg, #1e293b, #131c2e); box-shadow: 0 .18rem .55rem rgb(0 0 0 / .18); transform: none; }
+    .troop-card .card-copy {
       grid-column: 1;
-      grid-row: 1;
-      align-self: start;
-      padding: .4rem .5rem 0 1.1rem;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      padding: .55rem .65rem .55rem 1.1rem;
+    }
+    .troop-card .card-copy strong {
+      display: block;
+      max-width: 100%;
       font-size: 1.08rem;
       line-height: 1.15;
       overflow: hidden;
@@ -130,13 +267,12 @@
       white-space: nowrap;
     }
     .troop-card > .troop-details {
+      display: none;
+    }
+    .troop-card .card-copy > .troop-details {
       display: grid;
-      grid-column: 1;
-      grid-row: 1;
-      align-self: start;
-      /* Keep the effects directly under the name without changing the
-         original two-row placement of the icon and health counter. */
-      padding: 1.64rem .5rem .4rem 1.1rem;
+      width: 100%;
+      margin-top: .2rem;
       color: #cbd5e1;
       font-size: .96rem;
       line-height: 1.2;
@@ -144,53 +280,58 @@
     }
     .troop-details span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .upgraded-detail { color: #c084fc; }
-    .troop-symbol {
-      display: grid;
+    .card-visual {
       grid-column: 2;
-      grid-row: 1;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
       place-items: center;
+      min-width: 0;
+      padding: .45rem .3rem .55rem;
+    }
+    .troop-symbol {
+      display: block;
       font-size: 2.05rem;
       line-height: 1;
+      align-self: center;
+      justify-self: center;
     }
-    img.troop-symbol { width: 2.25rem; height: 2.25rem; margin: auto; object-fit: contain; }
+    img.troop-symbol { width: 2.55rem; height: 2.55rem; margin: 0; object-fit: contain; object-position: center; }
     .card-health {
-      display: grid;
-      grid-column: 2;
-      grid-row: 2;
-      place-items: start center;
-      padding-top: .1rem;
+      display: block;
+      padding: 0;
       color: #fb7185;
-      font-size: 1.22rem;
+      font-size: 1.08rem;
       font-weight: 700;
       line-height: 1;
+      white-space: nowrap;
     }
     .hero-card { background: #2f2818; }
     .player-two-tray .troop-card { border-color: #3b82f6; }
     .player-one-tray .troop-card { border-color: #ef4444; }
-    .troop-tray .troop-card.server-owner-one,
-    .troop-tray .troop-card.server-owner-two { border-color: #f8fafc; border-width: 2px; }
+    .troop-tray .troop-card.server-owner-one { border: 2px solid #ef4444; }
+    .troop-tray .troop-card.server-owner-two { border: 2px solid #3b82f6; }
     .troop-card.server-owner-one.deployment-starting::before { background: #b91c1c; }
     .troop-card.server-owner-one.deployment-intermediate::before { background: #f87171; }
     .troop-card.server-owner-one.deployment-both::before { background: linear-gradient(#b91c1c 50%, #f87171 50%); }
     .troop-card.server-owner-two.deployment-starting::before { background: #1d4ed8; }
     .troop-card.server-owner-two.deployment-intermediate::before { background: #60a5fa; }
     .troop-card.server-owner-two.deployment-both::before { background: linear-gradient(#1d4ed8 50%, #60a5fa 50%); }
-    .troop-tray .troop-card.deployed-card { border-width: 2px; }
-    .troop-tray .troop-card.server-owner-one.deployed-card { border-color: #ef4444; }
-    .troop-tray .troop-card.server-owner-two.deployed-card { border-color: #3b82f6; }
-    /* Side-card borders describe only deployment availability, never selection. */
-    .game-layout:not(.deck-building) .troop-tray .troop-card:not(.deployed-card):not(.unavailable-card) { border: 2px solid #f8fafc; }
-    .game-layout:not(.deck-building) .troop-tray .troop-card.server-owner-one.deployed-card:not(.unavailable-card) { border: 2px solid #ef4444; }
-    .game-layout:not(.deck-building) .troop-tray .troop-card.server-owner-two.deployed-card:not(.unavailable-card) { border: 2px solid #3b82f6; }
-    /* A troop that acted on its previous turn is unavailable to both players. */
+    /* Defeated/unavailable cards are neutral regardless of their owner. */
     .game-layout:not(.deck-building) .troop-tray .troop-card.unavailable-card { border: 2px solid #94a3b8; }
-    .game-layout:not(.deck-building) .troop-tray .troop-card.selected-card { box-shadow: none; }
+    .game-layout:not(.deck-building) .troop-tray .troop-card.selected-card { box-shadow: 0 .35rem 1rem rgb(0 0 0 / .3); }
     .hex { fill: transparent; stroke: #e5e7eb; stroke-width: 1.5; cursor: pointer; transition: stroke .15s; }
     .hex.hex-border-overlay { pointer-events: none; }
     .cell.player-one .hex, .cell.player-two .hex,
     .cell.player-one-middle .hex, .cell.player-two-middle .hex,
     .cell.player-one-side .hex, .cell.player-two-side .hex,
     .cell.front .hex { fill: transparent; stroke: #e5e7eb; }
+    .cell.player-one > .hex:not(.hex-border-overlay) { fill: url(#red-starting-region); }
+    .cell.player-two > .hex:not(.hex-border-overlay) { fill: url(#blue-starting-region); }
+    .cell.player-one-middle > .hex:not(.hex-border-overlay),
+    .cell.player-one-side > .hex:not(.hex-border-overlay) { fill: url(#red-intermediate-region); }
+    .cell.player-two-middle > .hex:not(.hex-border-overlay),
+    .cell.player-two-side > .hex:not(.hex-border-overlay) { fill: url(#blue-intermediate-region); }
+    .cell.front > .hex:not(.hex-border-overlay) { fill: url(#front-line-region); }
     .cell.center .hex { fill: #f8fafc; stroke: #e5e7eb; cursor: not-allowed; }
     .hex:hover, .hex.selected,
     .cell.player-one .hex:hover, .cell.player-one .hex.selected,
@@ -211,7 +352,7 @@
     .board-troop.sandbox-draggable:active { cursor: grabbing; }
     /* Board sprites are pre-coloured assets, so no runtime colour filter is needed. */
     .board-troop.player-one-troop, .board-troop.player-two-troop { filter: none; }
-    .board-troop-description { fill: #f8fafc; font-size: 13px; font-weight: 700; text-anchor: middle; pointer-events: none; user-select: none; }
+    .board-troop-description { fill: #f8fafc; font-size: 10.5px; font-weight: 750; text-anchor: middle; pointer-events: none; user-select: none; }
     .board-troop-description .upgraded-effect { fill: #c084fc; }
     .action-land { font-size: 12px; font-weight: 800; text-anchor: middle; pointer-events: none; user-select: none; }
     .action-land.player-one-effect { fill: #fecaca; }
@@ -277,10 +418,10 @@
        region/control colour, even if another state supplied its border. */
     #board .cell.action-target .hex { stroke-dasharray: 5 3 !important; }
     #board .cell.server-last-acting.action-target .hex { stroke-dasharray: 5 3 !important; }
-    /* Selection is a shared focus cue: both players see the troop currently
-       being touched in yellow, while ownership stays visible in fills. */
+    /* Selection uses the active side colour instead of introducing a third,
+       unexplained yellow ownership-like border. */
     #board .cell.server-selected .hex {
-      stroke: #facc15 !important;
+      stroke: var(--action-colour, #f8fafc) !important;
       stroke-width: 3.5;
       stroke-dasharray: none;
     }
@@ -309,6 +450,12 @@
     #board .cell.server-action-highlight-one .hex { fill: rgb(239 68 68 / .20) !important; }
     #board .cell.server-pending-target-two .hex,
     #board .cell.server-action-highlight-two .hex { fill: rgb(59 130 246 / .20) !important; }
+    #board .cell.drag-over .hex {
+      fill: var(--action-fill, rgb(248 250 252 / .16)) !important;
+      stroke: var(--action-colour, #f8fafc) !important;
+      stroke-width: 3;
+      stroke-dasharray: 5 3;
+    }
     .action-description-highlight { pointer-events: none; }
     .action-description-highlight.player-one-highlight { fill: rgb(239 68 68 / .30); }
     .action-description-highlight.player-two-highlight { fill: rgb(59 130 246 / .30); }
@@ -316,29 +463,63 @@
        shield line stays legible before the player confirms it. */
     .self-block-pending-highlight { fill: #0f172a; pointer-events: none; }
     #board .cell .hex:hover { stroke: var(--action-colour, #f8fafc) !important; }
+    #board .cell:focus { outline: none; }
+    #board .cell:focus-visible .hex { stroke: var(--action-colour, #f8fafc) !important; stroke-width: 3; }
     #hover-details {
       position: fixed;
-      bottom: 1.25rem;
-      left: 1.25rem;
+      bottom: .85rem;
+      left: .85rem;
       z-index: 5;
-      width: min(420px, calc(100vw - 2.5rem));
-      padding: .85rem 1rem;
-      border: 1px solid #475569;
-      border-radius: .5rem;
-      background: rgb(15 23 42 / .94);
-      box-shadow: 0 .5rem 1.5rem rgb(0 0 0 / .3);
+      display: grid;
+      gap: .45rem;
+      width: min(30rem, calc(100vw - 1.7rem));
       color: #cbd5e1;
-      font-size: 1.15rem;
-      line-height: 1.35;
+      font-size: .96rem;
+      line-height: 1.25;
       pointer-events: none;
     }
     #hover-details[hidden] { display: none; }
-    #hover-details section { position: relative; padding-right: 2.65rem; }
-    #hover-details section + section { margin-top: .55rem; padding-top: .55rem; border-top: 1px solid #334155; }
-    #hover-details strong { display: block; margin-bottom: .15rem; color: #f8fafc; }
-    #hover-details .hover-troop-symbol { position: absolute; top: 0; right: 0; width: 2.25rem; height: 2.25rem; object-fit: contain; }
-    #hover-details .hover-keyword { display: inline; margin: 0; font-weight: 800; color: #f8fafc; }
-    #hover-details .hover-keyword-rule { font-style: italic; }
+    #hover-details .hover-card {
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 4.5rem;
+      min-height: 5.5rem;
+      border: 2px solid #64748b;
+      border-radius: .65rem;
+      background: linear-gradient(145deg, rgb(30 41 59 / .98), rgb(19 28 46 / .98));
+      box-shadow: 0 .6rem 1.4rem rgb(0 0 0 / .36);
+    }
+    #hover-details .hover-card.server-owner-one { border-color: #ef4444; }
+    #hover-details .hover-card.server-owner-two { border-color: #3b82f6; }
+    #hover-details .hover-card-copy {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      justify-content: center;
+      padding: .65rem .7rem .65rem .85rem;
+    }
+    #hover-details .card-visual { border-left: 1px solid #64748b; }
+    #hover-details strong { display: block; margin-bottom: .18rem; color: #f8fafc; font-size: 1.04rem; }
+    #hover-details .hover-detail-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #hover-details .hover-rule-list {
+      display: grid;
+      gap: .28rem;
+      margin-top: .25rem;
+    }
+    #hover-details .hover-rule-line {
+      color: #cbd5e1;
+      font-size: .88rem;
+      line-height: 1.28;
+      overflow: visible;
+      white-space: normal;
+    }
+    #hover-details .hover-deployment-rule {
+      margin-bottom: .08rem;
+      padding-bottom: .35rem;
+      border-bottom: 1px solid rgb(100 116 139 / .55);
+      color: #fcd34d;
+    }
     #troop-inspector {
       position: fixed;
       inset: 0;
@@ -377,32 +558,58 @@
     .inspector-card h2 { margin: 0 0 .5rem; font-size: 1rem; }
     .inspector-card p { margin: .35rem 0; color: #cbd5e1; }
     .inspector-card ul { margin: .5rem 0 0; padding-left: 1.15rem; color: #e2e8f0; }
-    #action-bar { display: flex; justify-content: center; gap: .5rem; min-height: 2.5rem; margin-top: .5rem; }
+    #action-bar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: .5rem;
+      min-height: 2.5rem;
+      margin: .6rem auto 0;
+      width: fit-content;
+      max-width: 100%;
+      padding: .35rem .45rem;
+      border: 1px solid rgb(71 85 105 / .5);
+      border-radius: .65rem;
+      background: rgb(15 23 42 / .78);
+      box-shadow: 0 .35rem 1rem rgb(0 0 0 / .18);
+    }
     #action-bar:empty { display: none; }
     #action-bar button { border: 1px solid #64748b; border-radius: .35rem; background: #172033; color: #e2e8f0; padding: .35rem .6rem; cursor: pointer; }
+    #action-bar button:disabled { cursor: not-allowed; opacity: .42; }
     #action-bar button.active-action { border-color: #f8fafc; background: #334155; }
     #connection-status { min-height: 1.25rem; margin: .35rem 0 0; text-align: center; color: #94a3b8; font-size: .82rem; }
     #connection-status.connected { color: #86efac; }
     #connection-status.reconnecting, #connection-status.disconnected { color: #fcd34d; }
-    .screen { width: min(28rem, 92vw); padding: 1.5rem; border: 1px solid #475569; border-radius: .7rem; background: #172033; box-shadow: 0 1rem 3rem rgb(0 0 0 / .3); }
+    .screen { width: min(30rem, 92vw); padding: 1.65rem; border: 1px solid #475569; border-radius: 1rem; background: linear-gradient(145deg, rgb(30 41 59 / .98), rgb(15 23 42 / .98)); box-shadow: 0 1.25rem 3.5rem rgb(0 0 0 / .38); }
     .screen[hidden], main[hidden] { display: none; }
-    .screen h1 { margin-top: 0; }
+    .screen h1 { margin-top: 0; letter-spacing: -.025em; }
     .screen form, .screen nav { display: grid; gap: .75rem; }
     .screen nav[hidden] { display: none; }
-    .screen input, .screen button { padding: .6rem .75rem; border: 1px solid #64748b; border-radius: .35rem; background: #111827; color: #f8fafc; font: inherit; }
-    .screen button { cursor: pointer; }
+    .screen input, .screen button { padding: .68rem .8rem; border: 1px solid #64748b; border-radius: .5rem; background: #111827; color: #f8fafc; font: inherit; }
+    .screen button { cursor: pointer; transition: background .14s ease, border-color .14s ease, transform .14s ease, opacity .14s ease; }
+    .screen button:not(:disabled):hover, .screen button:not(:disabled):focus-visible { border-color: #cbd5e1; background: #273449; transform: translateY(-1px); outline: none; }
+    .screen button:disabled { cursor: not-allowed; opacity: .42; }
+    #deck-readiness { min-height: 2.5rem; margin: .9rem 0 0; padding: .65rem .75rem; border: 1px solid #475569; border-radius: .55rem; background: rgb(15 23 42 / .62); color: #fcd34d; font-size: .9rem; line-height: 1.3; }
+    #deck-readiness.ready { color: #86efac; border-color: rgb(34 197 94 / .45); }
     #login-error { min-height: 1.25rem; color: #fca5a5; }
     #play-format-error { min-height: 1.25rem; color: #fca5a5; }
     @media (max-width: 900px) {
-      .game-layout { grid-template-columns: 1fr 1fr; }
-      .board-area { grid-column: 1 / -1; grid-row: 1; }
-      .troop-tray { grid-row: 2; padding-top: 0; }
-      .card-list { height: auto; grid-template-rows: repeat(8, minmax(3.75rem, auto)); }
+      body { place-items: start center; overflow: auto; }
+      main { height: auto; min-height: 100dvh; }
+      .game-layout:not(.deck-building) { grid-template-columns: 1fr 1fr; height: auto; }
+      .game-layout:not(.deck-building) .board-area { grid-column: 1 / -1; grid-row: 1; justify-self: center; width: min(100%, 34rem); }
+      .game-layout:not(.deck-building) .troop-tray { grid-row: 2; height: min(45dvh, 30rem); }
+      .game-layout.deck-building { height: calc(100dvh - 4.5rem); }
     }
     @media (max-width: 560px) {
-      .game-layout { grid-template-columns: 1fr; }
-      .board-area, .troop-tray { grid-column: auto; grid-row: auto; }
-      .card-list { grid-template-columns: 1fr 1fr; }
+      .game-layout:not(.deck-building) { grid-template-columns: 1fr; }
+      .game-layout:not(.deck-building) .board-area,
+      .game-layout:not(.deck-building) .troop-tray { grid-column: auto; grid-row: auto; }
+      .game-layout.deck-building { grid-template-columns: 1fr; height: auto; }
+      .game-layout.deck-building .troop-tray { height: 55dvh; }
+      .game-layout.deck-building .card-list { grid-template-columns: 1fr; }
+      .game-layout.deck-building .grouped-card-list .card-role-cards { grid-template-columns: 1fr; }
     }
     /* The bar uses only the rendered card owner. Database cards are Blue;
        deck cards are Red; live cards use the player who owns them. */
@@ -418,6 +625,32 @@
     .troop-card[data-deployment-owner="red"].deployment-enemy.deployment-intermediate::before { background: repeating-linear-gradient(135deg, #f87171 0 2px, #1d4ed8 2px 4px) top / 100% 50% no-repeat, #f87171 !important; }
     .troop-card[data-deployment-owner="blue"].deployment-enemy.deployment-starting::before { background: repeating-linear-gradient(135deg, #1d4ed8 0 2px, #b91c1c 2px 4px) top / 100% 50% no-repeat, #1d4ed8 !important; }
     .troop-card[data-deployment-owner="blue"].deployment-enemy.deployment-intermediate::before { background: repeating-linear-gradient(135deg, #60a5fa 0 2px, #b91c1c 2px 4px) top / 100% 50% no-repeat, #60a5fa !important; }
+    .pointer-draggable { cursor: grab; touch-action: none; }
+    .pointer-draggable.dragging-card { cursor: grabbing; }
+    .troop-card.dragging-card, .board-troop.dragging-card { opacity: .3; }
+    .troop-drag-preview {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 9999;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 3.6rem;
+      align-items: center;
+      width: min(15rem, 42vw);
+      min-height: 4.75rem;
+      padding: .55rem .65rem;
+      border: 2px solid #f8fafc;
+      border-radius: .7rem;
+      background: linear-gradient(145deg, #334155, #172033);
+      box-shadow: 0 1rem 2rem rgb(0 0 0 / .42);
+      color: #f8fafc;
+      pointer-events: none;
+      transform: translate(-200vw, -200vh) rotate(2deg);
+    }
+    .troop-drag-preview strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .troop-drag-preview img { grid-column: 2; grid-row: 1; width: 2.8rem; height: 2.8rem; justify-self: center; object-fit: contain; transform: none; }
+    .troop-drag-preview[data-owner="1"] { border-color: #ef4444; }
+    .troop-drag-preview[data-owner="2"] { border-color: #3b82f6; }
   </style>
 </head>
 <body>
@@ -435,20 +668,21 @@
     <h1 id="welcome"></h1>
     <nav>
       <button id="build-decks" type="button">Build</button>
-      <button id="play-game" type="button">Play</button>
-      <button id="sandbox-game" type="button">Sandbox</button>
-      <button id="resume-sandbox" type="button" hidden>Resume sandbox</button>
+      <button id="play-game" type="button" disabled>Play</button>
+      <button id="sandbox-game" type="button" hidden>Playground</button>
+      <button id="resume-sandbox" type="button" hidden>Resume playground</button>
     </nav>
+    <p id="deck-readiness" role="status">Build a complete deck to unlock Play.</p>
     <nav id="play-formats" hidden aria-label="Choose game format">
       <button id="play-8-cards" type="button">8-card game</button>
       <button id="play-10-cards" type="button">10-card game</button>
       <button id="back-from-play" type="button">Back</button>
       <div id="play-format-error" role="alert"></div>
     </nav>
-    <nav id="sandbox-formats" hidden aria-label="Choose sandbox format">
-      <button id="sandbox-8-cards" type="button">New 8-card sandbox</button>
-      <button id="sandbox-10-cards" type="button">New 10-card sandbox</button>
-      <button id="load-sandbox" type="button">Load saved sandbox</button>
+    <nav id="sandbox-formats" hidden aria-label="Choose playground format">
+      <button id="sandbox-8-cards" type="button">New 8-card playground</button>
+      <button id="sandbox-10-cards" type="button">New 10-card playground</button>
+      <button id="load-sandbox" type="button">Load saved playground</button>
       <button id="back-from-sandbox" type="button">Back</button>
       <div id="sandbox-error" role="alert"></div>
     </nav>
@@ -464,13 +698,41 @@
   <main hidden>
     <div class="game-layout">
       <aside class="troop-tray player-two-tray">
-        <div id="player-two-cards" class="card-list" aria-label="Player 2 troops"></div>
+        <div id="player-two-cards" class="card-list" aria-label="Blue player cards"></div>
       </aside>
       <div class="board-area">
-        <svg id="board" viewBox="135 15 530 590" role="img" aria-label="Hexagonal axial coordinate grid"></svg>
+        <div class="board-region-key" aria-label="Board region patterns">
+          <span class="starting">Starting</span>
+          <span class="intermediate">Intermediate</span>
+          <span class="front-line">Front line</span>
+        </div>
+        <svg id="board" viewBox="135 15 530 590" role="img" aria-label="Hexagonal axial coordinate grid">
+          <defs aria-hidden="true">
+            <pattern id="red-starting-region" width="12" height="12" patternUnits="userSpaceOnUse">
+              <rect width="12" height="12" fill="#ef4444" fill-opacity=".10"></rect>
+              <path d="M-3 3L3-3M0 12L12 0M9 15L15 9" stroke="#fb7185" stroke-opacity=".18" stroke-width="1.4"></path>
+            </pattern>
+            <pattern id="blue-starting-region" width="12" height="12" patternUnits="userSpaceOnUse">
+              <rect width="12" height="12" fill="#3b82f6" fill-opacity=".10"></rect>
+              <path d="M-3 3L3-3M0 12L12 0M9 15L15 9" stroke="#60a5fa" stroke-opacity=".2" stroke-width="1.4"></path>
+            </pattern>
+            <pattern id="red-intermediate-region" width="10" height="10" patternUnits="userSpaceOnUse">
+              <rect width="10" height="10" fill="#ef4444" fill-opacity=".035"></rect>
+              <circle cx="5" cy="5" r="1.2" fill="#fca5a5" fill-opacity=".22"></circle>
+            </pattern>
+            <pattern id="blue-intermediate-region" width="10" height="10" patternUnits="userSpaceOnUse">
+              <rect width="10" height="10" fill="#3b82f6" fill-opacity=".035"></rect>
+              <circle cx="5" cy="5" r="1.2" fill="#93c5fd" fill-opacity=".24"></circle>
+            </pattern>
+            <pattern id="front-line-region" width="10" height="10" patternUnits="userSpaceOnUse">
+              <rect width="10" height="10" fill="#cbd5e1" fill-opacity=".045"></rect>
+              <path d="M0 2.5H10M0 7.5H10" stroke="#cbd5e1" stroke-opacity=".14" stroke-width="1"></path>
+            </pattern>
+          </defs>
+        </svg>
       </div>
       <aside class="troop-tray player-one-tray">
-        <div id="player-one-cards" class="card-list" aria-label="Player 1 troops"></div>
+        <div id="player-one-cards" class="card-list" aria-label="Red player cards"></div>
       </aside>
     </div>
     <div id="action-bar" aria-label="Selected troop actions"></div>

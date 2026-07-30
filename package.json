@@ -1,11 +1,14 @@
 {
+  "name": "guerra.game",
+  "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "check": "tsc --project tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests",
+    "test": "npm run build && node --test",
     "prestart": "npm run build",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "start:playground": "npm start -- --playground"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

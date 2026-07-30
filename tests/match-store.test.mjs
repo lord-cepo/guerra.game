@@ -3,14 +3,8 @@ import test from 'node:test';
 import { troopSeeds } from '../dist/game/cards.js';
 import { MatchStore } from '../server/match-store.mjs';
 
-const legacyCardNames = {
-  'p1-hero': 'tiger-queen', 'p1-1': 'ember-salamander', 'p1-2': 'desert-fox',
-  'p1-3': 'snowy-owl', 'p1-4': 'canyon-ibex', 'p1-5': 'marsh-badger',
-  'p1-6': 'dune-scorpion', 'p1-7': 'steppe-lynx'
-};
 const cards = new Map(troopSeeds.map(card => [card.id, card]));
-for (const [legacyId, currentId] of Object.entries(legacyCardNames)) cards.set(legacyId, { ...cards.get(currentId), id: legacyId });
-const deck = ['p1-hero', 'p1-1', 'p1-2', 'p1-3', 'p1-4', 'p1-5', 'p1-6', 'p1-7'];
+const deck = ['tiger-queen', 'ember-salamander', 'desert-fox', 'snowy-owl', 'canyon-ibex', 'marsh-badger', 'dune-scorpion', 'steppe-lynx'];
 
 test('match state contract includes format, health, revision, effects, bashes, and action log', () => {
   const store = new MatchStore(cards);
@@ -35,15 +29,15 @@ test('the public match state distinguishes identical cards owned by different pl
   store.setReady(created.id, 'bob');
   const red = created.players[1];
   const blue = created.players[2];
-  store.applyAction(created.id, red, { type: 'deploy', troopId: 'p1-hero', coordinate: '1,2' });
-  const state = store.applyAction(created.id, blue, { type: 'deploy', troopId: 'p1-hero', coordinate: '-1,-2' });
-  assert.deepEqual(state.units.map(unit => unit.id).sort(), ['1:p1-hero', '2:p1-hero']);
+  store.applyAction(created.id, red, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
+  const state = store.applyAction(created.id, blue, { type: 'deploy', troopId: 'tiger-queen', coordinate: '-1,-2' });
+  assert.deepEqual(state.units.map(unit => unit.id).sort(), ['1:tiger-queen', '2:tiger-queen']);
 });
 
 test('only a match participant can submit an action', () => {
   const store = new MatchStore(cards);
   const created = store.createMatch('alice', 'bob', deck, deck, 8);
-  assert.throws(() => store.applyAction(created.id, 'mallory', { type: 'deploy', troopId: 'p1-hero', coordinate: '1,2' }), /Match or player not found/);
+  assert.throws(() => store.applyAction(created.id, 'mallory', { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' }), /Match or player not found/);
 });
 
 test('a sandbox lets one nickname control either side of an authoritative match', () => {
@@ -54,11 +48,11 @@ test('a sandbox lets one nickname control either side of an authoritative match'
   });
   assert.equal(sandbox.sandbox, true);
   assert.equal(store.playerFor(sandbox.id, 'alice'), 1);
-  store.applyAction(sandbox.id, 'alice', { type: 'deploy', troopId: 'p1-hero', coordinate: '1,2' });
+  store.applyAction(sandbox.id, 'alice', { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
   store.setSandboxSide(sandbox.id, 'alice', 2);
   assert.equal(store.playerFor(sandbox.id, 'alice'), 2);
-  const state = store.applyAction(sandbox.id, 'alice', { type: 'deploy', troopId: 'p1-hero', coordinate: '-1,-2' });
-  assert.deepEqual(state.units.map(unit => unit.id).sort(), ['1:p1-hero', '2:p1-hero']);
+  const state = store.applyAction(sandbox.id, 'alice', { type: 'deploy', troopId: 'tiger-queen', coordinate: '-1,-2' });
+  assert.deepEqual(state.units.map(unit => unit.id).sort(), ['1:tiger-queen', '2:tiger-queen']);
 });
 
 test('a loaded sandbox resumes on its saved active player side', () => {
@@ -79,24 +73,39 @@ test('sandbox free placement ignores deployment and turn rules while retaining o
     units: [], effects: [], bashes: [], lastActingTroopId: {}, defeatedTroopIds: [], revision: 0, events: []
   });
   store.setSandboxFreePlacement(sandbox.id, 'alice', true);
-  store.placeSandboxTroop(sandbox.id, 'alice', 2, 'p1-4', '1,2');
-  store.placeSandboxTroop(sandbox.id, 'alice', 1, 'p1-3', '1,2');
+  store.placeSandboxTroop(sandbox.id, 'alice', 2, 'canyon-ibex', '1,2');
+  store.placeSandboxTroop(sandbox.id, 'alice', 1, 'snowy-owl', '1,2');
   const state = store.getState(sandbox.id);
   assert.equal(state.sandboxFreePlacement, true);
-  assert.deepEqual(state.units.map(unit => `${unit.owner}:${unit.troopId}@${unit.coordinate}`), ['1:p1-3@1,2']);
+  assert.deepEqual(state.units.map(unit => `${unit.owner}:${unit.troopId}@${unit.coordinate}`), ['1:snowy-owl@1,2']);
 });
 
 test('out-of-range selections are rejected before they can be shared as pending targets', () => {
   const store = new MatchStore(cards);
   const created = store.createMatch('alice', 'bob', deck, deck, 8);
   const match = store.matches.get(created.id);
-  match.game.units = [{ id: '1:p1-hero', troopId: 'p1-hero', owner: 1, coordinate: '1,2', permanentDamage: 0 }];
+  match.game.units = [{ id: '1:tiger-queen', troopId: 'tiger-queen', owner: 1, coordinate: '1,2', permanentDamage: 0 }];
 
   assert.throws(
-    () => store.setSelection(created.id, created.players[1], 'p1-hero', { type: 'move', coordinate: '-3,-4' }),
+    () => store.setSelection(created.id, created.players[1], 'tiger-queen', { type: 'move', coordinate: '-3,-4' }),
     /Destination is out of range/
   );
-  assert.equal(store.getState(created.id).targetSelections[1], undefined);
+  const state = store.getState(created.id);
+  assert.equal(state.selections[1], undefined);
+  assert.equal(state.targetSelections[1], undefined);
+});
+
+test('public state publishes engine-generated legal actions for the selected troop', () => {
+  const store = new MatchStore(cards);
+  const created = store.createMatch('alice', 'bob', deck, deck, 8);
+  const match = store.matches.get(created.id);
+  match.game.units = [
+    { id: '1:tiger-queen', troopId: 'tiger-queen', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+    { id: '2:tiger-queen', troopId: 'tiger-queen', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+  ];
+  const selected = store.setSelection(created.id, created.players[1], 'tiger-queen');
+  assert.equal(selected.legalActions[1].some(action => action.type === 'move' && action.coordinate === '1,1'), true);
+  assert.equal(selected.legalActions[1].some(action => action.type === 'move' && action.coordinate === '1,0'), true);
 });
 
 test('accepted actions update the revisioned public state', () => {
@@ -105,10 +114,10 @@ test('accepted actions update the revisioned public state', () => {
   store.setReady(created.id, 'alice');
   store.setReady(created.id, 'bob');
   const starter = created.players[1];
-  const next = store.applyAction(created.id, starter, { type: 'deploy', troopId: 'p1-hero', coordinate: '1,2' });
+  const next = store.applyAction(created.id, starter, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
   assert.equal(next.revision, 1);
   assert.equal(next.units[0].currentHealth, 6);
-  assert.deepEqual(next.events[0].action, { type: 'deploy', troopId: 'p1-hero', coordinate: '1,2' });
+  assert.deepEqual(next.events[0].action, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
 });
 
 test('diagnostic logs retain board snapshots alongside each accepted action', () => {
@@ -117,10 +126,10 @@ test('diagnostic logs retain board snapshots alongside each accepted action', ()
   store.setReady(created.id, 'alice');
   store.setReady(created.id, 'bob');
   const starter = created.players[1];
-  store.applyAction(created.id, starter, { type: 'deploy', troopId: 'p1-hero', coordinate: '1,2' });
+  store.applyAction(created.id, starter, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
   const log = store.diagnosticLog(created.id);
   const action = log.snapshots.find(snapshot => snapshot.kind === 'action');
-  assert.deepEqual(action.action, { type: 'deploy', troopId: 'p1-hero', coordinate: '1,2' });
+  assert.deepEqual(action.action, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
   assert.equal(action.state.units[0].coordinate, '1,2');
   assert.equal(log.finalState.revision, 1);
 });
@@ -134,13 +143,13 @@ test('a player loses when their last living card is unavailable after the oppone
   match.game = {
     activePlayer: 1,
     units: [
-      { id: '1:p1-hero', troopId: 'p1-hero', owner: 1, coordinate: '1,2', permanentDamage: 0 },
-      { id: '2:p1-hero', troopId: 'p1-hero', owner: 2, coordinate: '-1,-2', permanentDamage: 0 }
+      { id: '1:tiger-queen', troopId: 'tiger-queen', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+      { id: '2:tiger-queen', troopId: 'tiger-queen', owner: 2, coordinate: '-1,-2', permanentDamage: 0 }
     ],
-    effects: [], bashes: [], lastActingTroopId: { 2: 'p1-hero' },
+    effects: [], bashes: [], lastActingTroopId: { 2: 'tiger-queen' },
     defeatedTroopIds: deck.slice(1).map(troopId => `2:${troopId}`)
   };
-  const state = store.applyAction(created.id, created.players[1], { type: 'move', troopId: 'p1-hero', coordinate: '1,1' });
+  const state = store.applyAction(created.id, created.players[1], { type: 'move', troopId: 'tiger-queen', coordinate: '1,1' });
   assert.equal(state.winner, 1);
   assert.equal(state.status, 'finished');
 });

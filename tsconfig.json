@@ -5,8 +5,11 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM"],
     "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmitOnError": true,
     "outDir": "dist"
   },
-  "include": ["hex-grid.ts", "game/**/*.ts"]
+  "include": ["hex-grid.ts", "client/**/*.ts", "game/**/*.ts"]
 }
