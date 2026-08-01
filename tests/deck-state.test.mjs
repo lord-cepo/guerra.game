@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { addDeckCard, clearDeckSlots, completedDeckFormats, createDeckSlots, isCompleteDeck, moveDeckCard, removeDeckCard, selectedDeckCards, swapDeckCards } from '../dist/client/deck-state.js';
-import { cardRuleDetails, compareTroopsForTray, createTroopView, deploymentDescription, hasDeploymentTarget, trayRoleLabel } from '../dist/client/troop-view.js';
+import { boardDescriptionEntries, cardRuleDetails, compareTroopsForTray, createTroopView, deploymentDescription, hasDeploymentTarget, permanentUpgradeBonus, trayRoleLabel } from '../dist/client/troop-view.js';
 import { troopSeeds } from '../dist/game/cards.js';
 
 const catalogue = new Map(troopSeeds.map(card => [card.id, card]));
@@ -90,12 +90,12 @@ test('special deployment rules are explained in plain language', () => {
   assert.equal(deploymentDescription(caveViper), 'Front line once you control it.');
   assert.deepEqual(cardRuleDetails(duneScorpion), [
     'Enemy intermediate regions you control.',
-    'Move: up to 1 hex through a clear path; entering an enemy starts a bash.',
-    'Ranged attack: 1 physical damage at range 3; resolves after the opponent acts and shields can block it.'
+    '🥾1 (move): up to 1 hex through a clear path; entering an enemy starts a bash.',
+    '1🏹3 (ranged attack): 1 physical damage at distance 3; resolves after the opponent acts and shields can block it.'
   ]);
   assert.deepEqual(cardRuleDetails(caveViper), [
     'Front line once you control it.',
-    'Magic: 2 damage at range 3; resolves after the opponent acts, ignores shields, and kills only if lethal.',
+    '2🔥3 (magic): 2 damage at distance 3; resolves after the opponent acts, ignores shields, and kills only if lethal.',
     'Movement: this unit cannot move.'
   ]);
 });
@@ -166,4 +166,24 @@ test('every catalogue card exposes complete readable hover rules', () => {
     }
     if (seed.ruleDescription) assert.ok(rules.includes(seed.ruleDescription), `${seed.name} should explain its passive`);
   }
+});
+
+test('hover rules pair every action notation with a plain-language explanation', () => {
+  assert.ok(cardRuleDetails(createTroopView('queen-bee', 1)).includes(
+    '3🏹4 (ranged attack): 3 physical damage at distance 4; resolves after the opponent acts and shields can block it.'
+  ));
+  assert.ok(cardRuleDetails(createTroopView('ember-salamander', 1)).includes(
+    '3🔥2 (magic): 3 damage at distance 2; resolves after the opponent acts, ignores shields, and kills only if lethal.'
+  ));
+});
+
+test('Sahel Porcupine exposes accumulated event bonuses as magenta board and hover upgrades', () => {
+  const porcupine = createTroopView('sahel-porcupine', 1, {
+    id: '1:sahel-porcupine', troopId: 'sahel-porcupine', owner: 1, coordinate: '1,1',
+    permanentDamage: 0, currentHealth: 2, rangedDamageBonus: 2, rangedRangeBonus: 2
+  });
+  assert.deepEqual(permanentUpgradeBonus(porcupine, 'attack'), { left: 2, right: 2 });
+  const rangedLine = boardDescriptionEntries(porcupine).find(line => line.action === 'attack');
+  assert.deepEqual(rangedLine, { text: '3 🏹 3', action: 'attack', upgraded: false, staticLeft: true, staticRight: true });
+  assert.ok(cardRuleDetails(porcupine).some(rule => rule.startsWith('3🏹3 (ranged attack):')));
 });

@@ -30,6 +30,7 @@ function sandboxState(match) {
     units: match.units.map(({ currentHealth: _currentHealth, combat: _combat, ...unit }) => unit),
     effects: match.effects,
     bashes: match.bashes,
+    bombs: match.bombs ?? [],
     lastActingTroopId: match.lastActingTroopId,
     defeatedTroopIds: match.defeatedTroopIds,
     events: match.events
@@ -144,7 +145,7 @@ const server = createServer(async (request, response) => {
       // the laboratory so the fixed left/bottom side is active first.
       const catalogue = troopSeeds.map(card => card.id);
       const match = matchStore.createSandbox(nickname, {
-        format, decks: { 1: catalogue, 2: catalogue }, activePlayer: 2, units: [], effects: [], bashes: [], lastActingTroopId: {}, defeatedTroopIds: [], revision: 0, events: []
+        format, decks: { 1: catalogue, 2: catalogue }, activePlayer: 2, units: [], effects: [], bashes: [], bombs: [], lastActingTroopId: {}, defeatedTroopIds: [], revision: 0, events: []
       });
       await persistence.saveRuntime();
       return sendJson(response, 201, { match });
@@ -162,6 +163,7 @@ const server = createServer(async (request, response) => {
     }
 
     const sandboxSide = url.pathname.match(/^\/api\/sandbox\/([\w-]+)\/side$/);
+    const sandboxUndo = url.pathname.match(/^\/api\/sandbox\/([\w-]+)\/undo$/);
     const sandboxSave = url.pathname.match(/^\/api\/sandbox\/([\w-]+)\/save$/);
     if (request.method === 'POST' && sandboxSide) {
       const { nickname: rawNickname, side } = await readJsonBody(request);
@@ -180,6 +182,14 @@ const server = createServer(async (request, response) => {
       const savedAt = await persistence.writeSandbox(nickname, sandboxState(match));
       await persistence.saveRuntime();
       return sendJson(response, 200, { savedAt });
+    }
+    if (request.method === 'POST' && sandboxUndo) {
+      const nickname = cleanNickname((await readJsonBody(request)).nickname);
+      if (!nickname) return sendJson(response, 400, { error: 'A valid nickname is required.' });
+      const match = matchStore.undoSandbox(sandboxUndo[1], nickname);
+      await persistence.saveRuntime();
+      broadcast(sandboxUndo[1], { type: 'state', match });
+      return sendJson(response, 200, { match });
     }
 
     const stateMatch = url.pathname.match(/^\/api\/matches\/([\w-]+)$/);

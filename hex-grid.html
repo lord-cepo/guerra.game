@@ -343,6 +343,7 @@
     .cell.player-one .hex:hover, .cell.player-one .hex.selected,
     .cell.player-one-middle .hex:hover, .cell.player-one-middle .hex.selected,
     .cell.player-one-side .hex:hover, .cell.player-one-side .hex.selected { fill: transparent; stroke: #fca5a5; }
+    .cell.front .hex:hover, .cell.front .hex.selected { fill: transparent; }
     .cell.center .hex:hover, .cell.center .hex.selected { fill: #f8fafc; }
     .cell.movement-path .hex { fill: transparent; stroke: var(--action-colour, #f8fafc); stroke-width: 3; }
     .cell.action-target .hex { fill: transparent; stroke-dasharray: 5 3; }
@@ -354,6 +355,7 @@
     .board-troop.player-one-troop, .board-troop.player-two-troop { filter: none; }
     .board-troop-description { fill: #f8fafc; font-size: 10.5px; font-weight: 750; text-anchor: middle; pointer-events: none; user-select: none; }
     .board-troop-description .upgraded-effect { fill: #c084fc; }
+    .board-troop-description .static-effect { fill: #f472b6; }
     .action-land { font-size: 12px; font-weight: 800; text-anchor: middle; pointer-events: none; user-select: none; }
     .action-land.player-one-effect { fill: #fecaca; }
     .action-land.player-two-effect { fill: #bfdbfe; }
@@ -514,6 +516,10 @@
       overflow: visible;
       white-space: normal;
     }
+    #hover-details .hover-rule-label { display: inline; margin: 0; color: inherit; font-size: inherit; }
+    #hover-details .temporary-upgrade { color: #c084fc; font-weight: 700; }
+    #hover-details .static-upgrade { color: #f472b6; font-weight: 700; }
+    #hover-details .hover-upgrade-source::before { content: " · "; color: #94a3b8; font-weight: 400; }
     #hover-details .hover-deployment-rule {
       margin-bottom: .08rem;
       padding-bottom: .35rem;

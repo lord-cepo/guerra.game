@@ -10,6 +10,10 @@ export class Persistence {
     this.runtimeFile = resolve(dataDirectory, 'runtime.json');
     this.matchLogDirectory = resolve(dataDirectory, 'match-logs');
     this.sandboxDirectory = resolve(dataDirectory, 'sandboxes');
+    // WebSocket close handlers and shutdown can persist the same match at the
+    // same time. Serialize log writes so retention cannot unlink a file that
+    // another writer is still using.
+    this.matchLogQueue = Promise.resolve();
   }
 
   async loadRuntime() {
@@ -34,7 +38,13 @@ export class Persistence {
   }
 
   /** Persist a self-contained diagnostic trail and retain the ten newest logs. */
-  async saveMatchLog(matchId, reason) {
+  saveMatchLog(matchId, reason) {
+    const write = this.matchLogQueue.then(() => this.#writeMatchLog(matchId, reason));
+    this.matchLogQueue = write.catch(() => {});
+    return write;
+  }
+
+  async #writeMatchLog(matchId, reason) {
     const log = this.matchStore.diagnosticLog(matchId);
     if (!log) return;
     await mkdir(this.matchLogDirectory, { recursive: true });
@@ -47,7 +57,10 @@ export class Persistence {
       .map(entry => entry.name)
       .sort();
     const expired = files.slice(0, Math.max(0, files.length - 10));
-    await Promise.all(expired.map(file => unlink(resolve(this.matchLogDirectory, file))));
+    await Promise.all(expired.map(file => unlink(resolve(this.matchLogDirectory, file)).catch(error => {
+      // A stale cleanup entry can disappear after a previous retention pass.
+      if (error.code !== 'ENOENT') throw error;
+    })));
   }
 
   persistMatchLog(matchId, reason) {

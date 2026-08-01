@@ -84,11 +84,17 @@ export class MatchStore {
       activePlayer: state.activePlayer,
       winner: state.winner,
       units: state.units.map(({ currentHealth: _currentHealth, combat: _combat, ...unit }) => unit),
-      effects: structuredClone(state.effects ?? []), bashes: structuredClone(state.bashes ?? []),
+      effects: structuredClone(state.effects ?? []), bashes: structuredClone(state.bashes ?? []), bombs: structuredClone(state.bombs ?? []),
+      pendingResolution: structuredClone(state.pendingResolution),
+      pendingResolutionQueue: structuredClone(state.pendingResolutionQueue ?? []),
       lastActingTroopId: structuredClone(state.lastActingTroopId ?? {}),
       defeatedTroopIds: [...(state.defeatedTroopIds ?? [])], revision: state.revision ?? 0,
       events: structuredClone(state.events ?? []), triggerEvents: []
     };
+    for (const bash of game.bashes) {
+      const attacker = game.units.find(unit => unit.id === bash.attackerId || `${unit.owner}:${unit.troopId}` === bash.attackerId);
+      if (attacker) attacker.coordinate = bash.target;
+    }
     // A saved sandbox resumes on the side whose turn it is. New playgrounds
     // start with Blue, while saved checkpoints retain their exact turn.
     const match = {
@@ -137,6 +143,7 @@ export class MatchStore {
     const match = this.matches.get(matchId);
     if (!match || match.sandboxOwner !== nickname || !match.sandboxFreePlacement) throw new Error('Free placement is not enabled.');
     if ((owner !== 1 && owner !== 2) || !match.decks[owner].includes(troopId) || !isBoardCoordinate(coordinate)) throw new Error('Invalid sandbox placement.');
+    this.#rememberSandbox(match);
     const unit = match.game.units.find(candidate => candidate.owner === owner && candidate.troopId === troopId);
     const occupant = match.game.units.find(candidate => candidate.coordinate === coordinate && candidate !== unit);
     if (occupant) {
@@ -153,6 +160,19 @@ export class MatchStore {
     return this.recordDiagnostic(match, { kind: 'sandbox-placement', nickname, owner, troopId, coordinate });
   }
 
+  undoSandbox(matchId, nickname) {
+    const match = this.matches.get(matchId);
+    if (!match || match.sandboxOwner !== nickname) throw new Error('Playground not found.');
+    if (!match.sandboxUndo) throw new Error('There is no playground action to undo.');
+    const previous = match.sandboxUndo;
+    match.game = previous.game;
+    match.sandboxSide = previous.sandboxSide;
+    match.selections = previous.selections;
+    match.targetSelections = previous.targetSelections;
+    match.sandboxUndo = undefined;
+    return this.recordDiagnostic(match, { kind: 'sandbox-undo', nickname });
+  }
+
   publicState(match) {
     const legalActions = {};
     for (const player of [1, 2]) {
@@ -165,7 +185,7 @@ export class MatchStore {
       status: match.game.winner ? 'finished' : match.status,
       activePlayer: match.game.activePlayer,
       players: { ...match.players },
-      sandbox: Boolean(match.sandboxOwner), sandboxSide: match.sandboxSide, sandboxFreePlacement: Boolean(match.sandboxFreePlacement),
+      sandbox: Boolean(match.sandboxOwner), sandboxSide: match.sandboxSide, sandboxFreePlacement: Boolean(match.sandboxFreePlacement), sandboxUndoAvailable: Boolean(match.sandboxOwner && match.sandboxUndo),
       format: match.format,
       ready: { ...match.ready },
       deckChoices: { ...match.deckChoices },
@@ -184,6 +204,8 @@ export class MatchStore {
       defeatedTroopIds: [...(match.game.defeatedTroopIds ?? [])],
       effects: structuredClone(match.game.effects),
       bashes: structuredClone(match.game.bashes),
+      bombs: structuredClone(match.game.bombs ?? []),
+      pendingResolution: structuredClone(match.game.pendingResolution),
       triggerEvents: structuredClone(match.game.triggerEvents?.slice(-100) ?? []),
       lastActingTroopId: { ...(match.game.lastActingTroopId ?? {}) },
       winner: match.game.winner,
@@ -232,18 +254,33 @@ export class MatchStore {
       match.selections ??= { 1: undefined, 2: undefined };
       match.targetSelections ??= { 1: undefined, 2: undefined };
       match.sandboxFreePlacement ??= false;
+      match.game.bombs ??= [];
       match.diagnostics ??= { createdAt: new Date().toISOString(), snapshots: [] };
+      for (const bash of match.game?.bashes ?? []) {
+        const attacker = match.game.units.find(unit => unit.id === bash.attackerId || `${unit.owner}:${unit.troopId}` === bash.attackerId);
+        if (attacker) attacker.coordinate = bash.target;
+      }
     }
   }
 
   applyAction(matchId, nickname, action) {
     const { match, player } = this.#matchAndPlayer(matchId, nickname);
     if (match.status !== 'active' || !match.ready[1] || !match.ready[2]) throw new Error('Both players must be ready.');
-    if (match.game.activePlayer !== player) throw new Error('It is not your turn.');
+    if ((match.game.pendingResolution?.owner ?? match.game.activePlayer) !== player) throw new Error('It is not your turn.');
     if (!action || typeof action.type !== 'string') throw new Error('Invalid action.');
 
     if (action.type !== 'pass' && !match.decks[player].includes(action.troopId)) throw new Error('Troop is not in your deck.');
+    if (match.sandboxOwner) this.#rememberSandbox(match);
     match.game = applyGameAction(match.game, player, action, this.cardsById);
+    if (match.game.pendingResolution) {
+      const resolutionOwner = match.game.pendingResolution.owner;
+      match.selections[player] = undefined;
+      match.selections[resolutionOwner] = match.game.pendingResolution.sourceTroopId;
+      match.targetSelections[player] = undefined;
+      match.targetSelections[resolutionOwner] = undefined;
+      if (match.sandboxOwner) match.sandboxSide = resolutionOwner;
+      return this.recordDiagnostic(match, { kind: 'action', player, nickname, action: structuredClone(action) });
+    }
     // A player cannot repeat the troop that acted on their preceding turn.
     // If that was their final living card, they have no legal action when the
     // turn passes and immediately lose the match.
@@ -263,8 +300,20 @@ export class MatchStore {
     return this.recordDiagnostic(match, { kind: 'action', player, nickname, action: structuredClone(action) });
   }
 
+  #rememberSandbox(match) {
+    match.sandboxUndo = {
+      game: structuredClone(match.game),
+      sandboxSide: match.sandboxSide,
+      selections: structuredClone(match.selections ?? { 1: undefined, 2: undefined }),
+      targetSelections: structuredClone(match.targetSelections ?? { 1: undefined, 2: undefined })
+    };
+  }
+
   setSelection(matchId, nickname, troopId, target) {
     const { match, player } = this.#matchAndPlayer(matchId, nickname);
+    if (match.game.pendingResolution) {
+      if (match.game.pendingResolution.owner !== player || troopId !== match.game.pendingResolution.sourceTroopId) throw new Error('Resolve the pending event action first.');
+    }
     if (troopId !== undefined && (!match.decks[player].includes(troopId) || match.game.defeatedTroopIds?.includes(`${player}:${troopId}`))) {
       throw new Error('Troop cannot be selected.');
     }

@@ -160,12 +160,20 @@ test('queue and WebSocket match integration', async t => {
     sandboxClient.send(JSON.stringify({ type: 'action', matchId: sandbox.id, action: { type: 'pass' } }));
     await passed;
 
+    const bombardierPlaced = waitFor(sandboxClient, 'sandbox bombardier placement', message => message.type === 'state' && message.match.units.some(unit => unit.owner === 2 && unit.troopId === 'bombardier-beetle' && unit.coordinate === '-1,-1'));
+    sandboxClient.send(JSON.stringify({ type: 'sandbox-place', matchId: sandbox.id, owner: 2, troopId: 'bombardier-beetle', coordinate: '-1,-1' }));
+    await bombardierPlaced;
+    const bombThrown = waitFor(sandboxClient, 'sandbox bomb placement', message => message.type === 'state' && message.match.bombs?.some(bomb => bomb.coordinate === '-1,0' && bomb.damage === 2));
+    sandboxClient.send(JSON.stringify({ type: 'action', matchId: sandbox.id, action: { type: 'bomb', troopId: 'bombardier-beetle', coordinate: '-1,0' } }));
+    await bombThrown;
+
     const saved = await json(`/api/sandbox/${sandbox.id}/save`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: 'alice' }) });
     assert.equal(saved.response.status, 200);
     const loaded = await json('/api/sandbox/load', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: 'alice' }) });
     assert.equal(loaded.response.status, 200);
     assert.equal(loaded.body.match.sandbox, true);
-    assert.equal(loaded.body.match.activePlayer, 2);
+    assert.deepEqual(loaded.body.match.bombs, [{ owner: 2, sourceTroopId: 'bombardier-beetle', coordinate: '-1,0', damage: 2 }]);
+    assert.equal(loaded.body.match.activePlayer, 1);
     assert.notEqual(loaded.body.match.id, sandbox.id);
     const switched = await json(`/api/sandbox/${loaded.body.match.id}/side`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: 'alice', side: 1 }) });
     assert.equal(switched.body.match.sandboxSide, 1);
