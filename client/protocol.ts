@@ -1,6 +1,6 @@
 import type { UpgradableAbility } from '../game/cards.js';
 import type { Coordinate } from '../game/board.js';
-import type { GameAction, PendingResolution } from '../game/engine.js';
+import type { GameAction, PendingResolution, StackAction, TurnPhase } from '../game/engine.js';
 import type { Player } from '../game/types.js';
 
 export type GameActionType = GameAction['type'];
@@ -24,6 +24,7 @@ export interface ServerUnitState {
   currentHealth: number;
   rangedDamageBonus?: number;
   rangedRangeBonus?: number;
+  bashModifierBonus?: number;
   upgrades?: Array<{ ability?: UpgradableAbility; left?: number; right?: number; sourceUnitId?: string }>;
   combat: {
     health: number;
@@ -71,6 +72,7 @@ export interface ServerTargetSelection {
 export interface ServerMatchState {
   id: string;
   activePlayer: Player;
+  phase: TurnPhase;
   players: { 1: string; 2: string };
   sandbox?: boolean;
   sandboxSide?: Player;
@@ -89,6 +91,9 @@ export interface ServerMatchState {
   bombs?: Array<{ owner: Player; sourceTroopId: string; coordinate: Coordinate; damage: number }>;
   bashes: ServerBashState[];
   pendingResolution?: PendingResolution;
+  dashboard: StackAction[];
+  resolutionStack: number[];
+  currentEventId?: number;
   lastActingTroopId?: Partial<Record<Player, string>>;
   selections?: Partial<Record<Player, string>>;
   targetSelections?: Partial<Record<Player, ServerTargetSelection>>;

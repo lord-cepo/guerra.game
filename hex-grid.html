@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Guerra</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Kalam:wght@300;400;700&display=swap');
+
     :root {
       color-scheme: dark;
       --surface: #172033;
@@ -14,6 +16,7 @@
       --muted: #94a3b8;
     }
     * { box-sizing: border-box; }
+    button, input, select, textarea { font: inherit; }
     body {
       margin: 0;
       min-height: 100vh;
@@ -21,11 +24,9 @@
       display: grid;
       place-items: center;
       overflow: hidden;
-      background:
-        radial-gradient(circle at 50% -20%, rgb(59 130 246 / .14), transparent 42rem),
-        linear-gradient(145deg, #0b1120, #111827 55%, #0f172a);
+      background: #d9bd88 url('./assets/background.png') center / cover no-repeat fixed;
       color: var(--text);
-      font: 16px system-ui, sans-serif;
+      font: 16px "Kalam", "Segoe Print", "Bradley Hand", cursive;
     }
     body.local-player-one { --action-colour: #ef4444; --action-fill: rgb(239 68 68 / .20); }
     body.local-player-two { --action-colour: #3b82f6; --action-fill: rgb(59 130 246 / .20); }
@@ -41,10 +42,11 @@
     p { color: #9ca3af; margin: 0 0 1rem; }
     .game-layout {
       display: grid;
+      isolation: isolate;
       grid-template-columns:
-        minmax(12rem, 1fr)
-        minmax(22rem, min(50vw, calc((100dvh - 5rem) * .8983)))
-        minmax(12rem, 1fr);
+        minmax(8rem, clamp(9rem, 11vw, 12rem))
+        minmax(0, 1fr)
+        minmax(8rem, clamp(9rem, 11vw, 12rem));
       gap: clamp(.55rem, 1.5vw, 1.6rem);
       align-items: stretch;
       min-height: 0;
@@ -52,62 +54,46 @@
     }
     .board-area {
       position: relative;
+      z-index: 10;
       display: grid;
       place-items: center;
       align-self: center;
-      width: 100%;
-      height: auto;
+      justify-self: center;
+      width: auto;
+      height: 100%;
+      max-width: 100%;
       max-height: 100%;
-      aspect-ratio: 530 / 590;
-      border: 1px solid rgb(71 85 105 / .35);
-      border-radius: 1rem;
-      background: radial-gradient(circle, rgb(30 41 59 / .38), rgb(15 23 42 / .08) 68%);
-      box-shadow: inset 0 0 3rem rgb(15 23 42 / .34);
+      aspect-ratio: 840 / 530;
+      background-color: transparent;
     }
+    .board-area::before,
+    .board-area::after {
+      content: '';
+      position: absolute;
+      /* Give the oversized artwork enough transparent canvas to reach across
+         the deck columns. The subtraction keeps the artwork itself at the
+         exact size it had with a -1rem inset. */
+      inset: -4rem;
+      background-position: center;
+      background-size: calc(108% - 6.48rem) calc(112% - 6.72rem);
+      background-repeat: no-repeat;
+      pointer-events: none;
+    }
+    .board-area::before {
+      z-index: 100;
+      background-image: url('./assets/frame_bg_sat.png');
+    }
+    .board-area::after { z-index: 101; }
+    body.active-player-one .board-area::after { background-image: url('./assets/frame_jewel_red.png'); }
+    body.active-player-two .board-area::after { background-image: url('./assets/frame_jewel_blue.png'); }
     svg {
       width: 100%;
       height: 100%;
       display: block;
     }
-    /* Ownership is spatially stable: Blue is always left/bottom and Red is
-       always right/top. Icons and text are counter-rotated in TypeScript. */
-    body.board-player-two #board { transform: rotate(180deg); transform-box: view-box; transform-origin: center; }
-    .board-region-key {
-      position: absolute;
-      top: .55rem;
-      left: .55rem;
-      z-index: 2;
-      display: grid;
-      gap: .22rem;
-      padding: .35rem .45rem;
-      border: 1px solid rgb(100 116 139 / .38);
-      border-radius: .45rem;
-      background: rgb(15 23 42 / .76);
-      color: #cbd5e1;
-      font-size: .61rem;
-      font-weight: 750;
-      letter-spacing: .035em;
-      line-height: 1;
-      pointer-events: none;
-    }
-    .board-region-key span { display: flex; align-items: center; gap: .32rem; }
-    .board-region-key span::before {
-      content: '';
-      width: .85rem;
-      height: .62rem;
-      border: 1px solid rgb(203 213 225 / .42);
-      border-radius: .14rem;
-    }
-    .board-region-key .starting::before {
-      background: repeating-linear-gradient(135deg, rgb(148 163 184 / .28) 0 2px, rgb(51 65 85 / .16) 2px 5px);
-    }
-    .board-region-key .intermediate::before {
-      background: radial-gradient(circle, rgb(203 213 225 / .42) 0 1px, transparent 1.5px) 0 0 / 5px 5px, rgb(51 65 85 / .18);
-    }
-    .board-region-key .front-line::before {
-      background: repeating-linear-gradient(0deg, rgb(203 213 225 / .3) 0 1px, rgb(51 65 85 / .14) 1px 4px);
-    }
     .troop-tray {
+      position: relative;
+      z-index: -1;
       min-width: 0;
       min-height: 0;
       padding-top: 0;
@@ -116,13 +102,13 @@
     .card-list {
       display: grid;
       grid-template-columns: 1fr;
-      grid-auto-rows: minmax(5.15rem, auto);
+      grid-auto-rows: minmax(4.35rem, auto);
       align-content: start;
       height: 100%;
       min-height: 0;
-      gap: .5rem;
+      gap: .38rem;
       overflow-y: auto;
-      padding: .2rem .35rem .2rem .1rem;
+      padding: .55rem .65rem;
       scrollbar-gutter: stable;
     }
     .game-layout.deck-building .card-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -166,7 +152,7 @@
     }
     .card-role-cards {
       display: grid;
-      gap: .5rem;
+      gap: .55rem;
       min-width: 0;
     }
     .game-layout.deck-building .grouped-card-list .card-role-cards {
@@ -176,15 +162,15 @@
     .troop-card.database-card { cursor: grab; }
     .troop-card {
       position: relative;
-      overflow: hidden;
+      overflow: visible;
       display: grid;
       grid-template-columns: minmax(0, 1fr) 4.5rem;
       width: 100%;
-      min-height: 5.15rem;
+      min-height: 4.35rem;
       padding: 0;
-      border: 1px solid #334155;
-      border-radius: .65rem;
-      background: linear-gradient(145deg, #1e293b, #131c2e);
+      border: 0;
+      border-radius: 0;
+      background: transparent;
       color: #e2e8f0;
       text-align: left;
       font: inherit;
@@ -209,6 +195,10 @@
       position: absolute;
       inset: 0 auto 0 0;
       width: 12px;
+      z-index: 5;
+      opacity: 1;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 86%, transparent 100%);
+      mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 86%, transparent 100%);
       pointer-events: none;
     }
     .player-two-tray .troop-card.deployment-starting::before { background: #1d4ed8; }
@@ -249,19 +239,29 @@
     }
     .troop-card.inactive-player-card:hover { border-color: inherit; background: linear-gradient(145deg, #1e293b, #131c2e); box-shadow: 0 .18rem .55rem rgb(0 0 0 / .18); transform: none; }
     .troop-card .card-copy {
-      grid-column: 1;
+      position: relative;
+      z-index: 4;
+      grid-column: 1 / -1;
+      grid-row: 1;
       display: flex;
       min-width: 0;
       flex-direction: column;
       justify-content: center;
       align-items: flex-start;
-      padding: .55rem .65rem .55rem 1.1rem;
+      padding: .35rem .55rem .4rem .9rem;
+      pointer-events: none;
     }
     .troop-card .card-copy strong {
       display: block;
+      width: 100%;
       max-width: 100%;
-      font-size: 1.08rem;
+      padding-right: .2rem;
+      color: #fff;
+      font-size: .98rem;
+      font-weight: 900;
       line-height: 1.15;
+      text-shadow: 0 1px 1px #000, 0 0 3px #000, 0 0 7px rgb(0 0 0 / .95);
+      -webkit-text-stroke: .35px rgb(0 0 0 / .9);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -271,38 +271,75 @@
     }
     .troop-card .card-copy > .troop-details {
       display: grid;
-      width: 100%;
+      width: calc(100% - 4.25rem);
       margin-top: .2rem;
-      color: #cbd5e1;
-      font-size: .96rem;
+      color: #fff;
+      font-size: .86rem;
+      font-weight: 800;
       line-height: 1.2;
+      text-shadow: 0 1px 1px #000, 0 0 3px #000, 0 0 6px #000;
       overflow: hidden;
     }
     .troop-details span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .upgraded-detail { color: #c084fc; }
     .card-visual {
+      position: relative;
+      z-index: 2;
       grid-column: 2;
+      grid-row: 1;
       display: grid;
       grid-template-rows: minmax(0, 1fr) auto;
       place-items: center;
       min-width: 0;
-      padding: .45rem .3rem .55rem;
+      padding: 1.15rem .25rem .3rem;
     }
     .troop-symbol {
       display: block;
-      font-size: 2.05rem;
+      font-size: 1.65rem;
       line-height: 1;
       align-self: center;
       justify-self: center;
+      filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 2px #000) drop-shadow(0 0 4px #000);
     }
-    img.troop-symbol { width: 2.55rem; height: 2.55rem; margin: 0; object-fit: contain; object-position: center; }
+    img.troop-symbol { width: 1.9rem; height: 1.9rem; margin: 0; object-fit: contain; object-position: center; }
+    .troop-card-artwork,
+    .troop-card-frame {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    .troop-card-artwork {
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      opacity: .8;
+      overflow: hidden;
+      clip-path: inset(0);
+      -webkit-mask-image:
+        linear-gradient(to right, transparent 0%, #000 13%, #000 87%, transparent 100%),
+        linear-gradient(to bottom, transparent 0%, #000 13%, #000 87%, transparent 100%);
+      -webkit-mask-composite: source-in;
+      mask-image:
+        linear-gradient(to right, transparent 0%, #000 13%, #000 87%, transparent 100%),
+        linear-gradient(to bottom, transparent 0%, #000 13%, #000 87%, transparent 100%);
+      mask-composite: intersect;
+    }
+    .troop-card-frame {
+      z-index: 3;
+      inset: -.45rem;
+      background: url('./assets/card_frame.png') center / 105% 108% no-repeat;
+    }
     .card-health {
       display: block;
       padding: 0;
       color: #fb7185;
-      font-size: 1.08rem;
-      font-weight: 700;
+      font-size: 1.3rem;
+      font-weight: 900;
       line-height: 1;
+      text-shadow: 0 1px 1px #000, 0 0 3px #000, 0 0 6px #000;
+      -webkit-text-stroke: .3px #000;
       white-space: nowrap;
     }
     .hero-card { background: #2f2818; }
@@ -320,6 +357,7 @@
     .game-layout:not(.deck-building) .troop-tray .troop-card.unavailable-card { border: 2px solid #94a3b8; }
     .game-layout:not(.deck-building) .troop-tray .troop-card.selected-card { box-shadow: 0 .35rem 1rem rgb(0 0 0 / .3); }
     .hex { fill: transparent; stroke: #e5e7eb; stroke-width: 1.5; cursor: pointer; transition: stroke .15s; }
+    .board-hex-artwork { pointer-events: none; }
     .hex.hex-border-overlay { pointer-events: none; }
     .cell.player-one .hex, .cell.player-two .hex,
     .cell.player-one-middle .hex, .cell.player-two-middle .hex,
@@ -353,15 +391,72 @@
     .board-troop.sandbox-draggable:active { cursor: grabbing; }
     /* Board sprites are pre-coloured assets, so no runtime colour filter is needed. */
     .board-troop.player-one-troop, .board-troop.player-two-troop { filter: none; }
-    .board-troop-description { fill: #f8fafc; font-size: 10.5px; font-weight: 750; text-anchor: middle; pointer-events: none; user-select: none; }
+    .board-info-frame { stroke: none; pointer-events: none; }
+    .board-info-frame.player-one-info-frame { fill: rgb(127 29 29 / .4); mask: url(#info-hex-edge-fade); }
+    .board-info-frame.player-two-info-frame { fill: rgb(30 58 138 / .4); mask: url(#info-hex-edge-fade); }
+    .board-troop-description { fill: #f8fafc; filter: drop-shadow(0 1px 1px #0f172a) drop-shadow(0 0 2px #0f172a); font-size: 10.5px; font-weight: 750; text-anchor: middle; pointer-events: none; user-select: none; }
+    .board-troop-description .board-info-glyph { stroke: rgb(15 23 42 / .92); stroke-width: 1.8px; paint-order: stroke fill; }
+    .board-troop-description .board-info-emoji { stroke: none; }
+    .board-troop-description .board-health {
+      font-size: 11.5px;
+      font-weight: 800;
+      opacity: .88;
+    }
+    .board-troop-description .board-health-heart,
+    .board-troop-description .board-health-value {
+      stroke: rgb(15 23 42 / .72);
+      stroke-width: 1px;
+      paint-order: stroke fill;
+    }
+    .board-troop-description .player-one-health { fill: #d96b6b; }
+    .board-troop-description .player-two-health { fill: #6f96d8; }
     .board-troop-description .upgraded-effect { fill: #c084fc; }
     .board-troop-description .static-effect { fill: #f472b6; }
     .action-land { font-size: 12px; font-weight: 800; text-anchor: middle; pointer-events: none; user-select: none; }
     .action-land.player-one-effect { fill: #fecaca; }
     .action-land.player-two-effect { fill: #bfdbfe; }
-    .bash-stat { font-size: 13px; font-weight: 800; text-anchor: middle; pointer-events: none; user-select: none; }
+    .bash-stat {
+      font-size: 11.5px;
+      font-weight: 800;
+      text-anchor: middle;
+      pointer-events: none;
+      user-select: none;
+      stroke: rgb(15 23 42 / .72);
+      stroke-width: 1px;
+      paint-order: stroke fill;
+      filter: drop-shadow(0 1px 1px #0f172a) drop-shadow(0 0 2px #0f172a);
+    }
+    .bash-modifier { font-size: 11px; }
+    .bash-troop-picture {
+      pointer-events: none;
+      transition: clip-path .34s ease-in-out, opacity .34s ease-in-out;
+    }
+    .bash-left-picture { clip-path: inset(0 50% 0 0); }
+    .bash-right-picture { clip-path: inset(0 0 0 50%); }
+    .cell.bash-focus-left .bash-left-picture,
+    .cell.bash-focus-right .bash-right-picture { clip-path: inset(0); }
+    .cell.bash-focus-left .bash-right-picture { clip-path: inset(0 0 0 100%); opacity: 0; }
+    .cell.bash-focus-right .bash-left-picture { clip-path: inset(0 100% 0 0); opacity: 0; }
+    .bash-side-ui {
+      opacity: 1;
+      transition: translate .34s ease-in-out, opacity .34s ease-in-out;
+    }
+    .bash-side-description {
+      opacity: 0;
+      transition: opacity .34s ease-in-out;
+    }
+    .cell.bash-focus-left .bash-left-ui { translate: 18px 0; }
+    .cell.bash-focus-right .bash-right-ui { translate: -18px 0; }
+    .cell.bash-focus-left .bash-right-ui,
+    .cell.bash-focus-right .bash-left-ui { opacity: 0; }
+    .cell.bash-focus-left .bash-left-description,
+    .cell.bash-focus-right .bash-right-description { opacity: 1; }
     .bash-stat.player-one-bash { fill: #fecaca; }
     .bash-stat.player-two-bash { fill: #bfdbfe; }
+    .bash-health.player-one-bash,
+    .bash-modifier.player-one-bash { fill: #d96b6b; }
+    .bash-health.player-two-bash,
+    .bash-modifier.player-two-bash { fill: #6f96d8; }
     .bash-icon { font-size: 1.2rem; text-anchor: middle; pointer-events: none; user-select: none; }
     .bash-border { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     .bash-border.player-one-bash { stroke: #ef4444; }
@@ -467,6 +562,184 @@
     #board .cell .hex:hover { stroke: var(--action-colour, #f8fafc) !important; }
     #board .cell:focus { outline: none; }
     #board .cell:focus-visible .hex { stroke: var(--action-colour, #f8fafc) !important; stroke-width: 3; }
+    /* The transparent PNG sprites now provide the visible board geometry;
+       retain polygons only as invisible hit areas and clipping shapes. */
+    #board .cell > .hex,
+    #board .cell > .bash-border {
+      fill: transparent !important;
+      stroke: transparent !important;
+    }
+    /* Board interaction language: legal destinations rise above the board,
+       free cells get only a quiet shadow, and occupied cells animate their art. */
+    #board .cell {
+      transition: transform .18s ease, filter .18s ease;
+    }
+    #board .cell.action-target,
+    #board .cell.server-pending-target,
+    #board .cell.server-reachable {
+      transform: translateY(-3px) scale(.95);
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+    #board .cell.action-target > .hex,
+    #board .cell.server-pending-target > .hex,
+    #board .cell.server-reachable > .hex,
+    #board .cell.action-target > .bash-border,
+    #board .cell.server-pending-target > .bash-border,
+    #board .cell.server-reachable > .bash-border {
+      stroke-dasharray: none !important;
+    }
+    #board .cell.action-target > .hex-border-overlay,
+    #board .cell.server-reachable:not(.server-pending-target) > .hex-border-overlay {
+      fill: rgb(255 255 255 / .12) !important;
+      stroke: transparent !important;
+    }
+    #board .cell:not(.center):not(.server-occupied):hover > .hex-border-overlay {
+      fill: rgb(0 0 0 / .08) !important;
+      stroke: transparent !important;
+    }
+    #board .cell.center {
+      pointer-events: none;
+    }
+    @keyframes occupied-card-perspective {
+      0% { transform: perspective(150px) rotateY(0deg); }
+      25% { transform: perspective(150px) rotateY(-10deg); }
+      75% { transform: perspective(150px) rotateY(10deg); }
+      100% { transform: perspective(150px) rotateY(0deg); }
+    }
+    @keyframes troop-deploy-fall {
+      0% {
+        opacity: 0;
+        translate: 0 -150px;
+      }
+      35% { opacity: .28; }
+      72% { opacity: .82; }
+      100% {
+        opacity: 1;
+        translate: 0 0;
+      }
+    }
+    #board .board-unit-visual.deploy-fall-animation {
+      animation: troop-deploy-fall 1.4s cubic-bezier(.2, .72, .3, 1) both;
+      will-change: translate, opacity;
+    }
+    @keyframes troop-move-out {
+      from { opacity: 1; translate: 0 0; }
+      to { opacity: 0; translate: 0 55px; }
+    }
+    @keyframes troop-move-in {
+      from { opacity: 0; translate: 0 55px; }
+      to { opacity: 1; translate: 0 0; }
+    }
+    #board .board-unit-visual.troop-move-out-animation {
+      animation: troop-move-out .8s ease-in-out both;
+      pointer-events: none;
+      will-change: translate, opacity;
+    }
+    #board .board-unit-visual.troop-move-in-animation {
+      animation: troop-move-in .8s ease-in-out both;
+      will-change: translate, opacity;
+    }
+    @keyframes troop-push-in {
+      from { translate: var(--push-from-x, 0) var(--push-from-y, 0); }
+      to { translate: 0 0; }
+    }
+    #board .board-unit-visual.troop-push-in-animation {
+      animation: troop-push-in .78s cubic-bezier(.06, .78, .18, 1) both;
+      will-change: translate;
+    }
+    .bomb-action-icon,
+    .bomb-flight { pointer-events: none; }
+    .bomb-unlit-preview { filter: drop-shadow(0 1px 2px rgb(15 23 42 / .55)); }
+    .bomb-pencil-trajectory {
+      fill: none;
+      stroke: rgb(65 54 40 / .4);
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      pointer-events: none;
+      animation: bomb-pencil-trace 2.8s linear forwards;
+    }
+    @keyframes bomb-pencil-trace {
+      0% { stroke-dashoffset: 1; }
+      32.15% { stroke-dashoffset: 0; }
+      67.85% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: -1; }
+    }
+    #board .cell.server-occupied:not(.server-last-acting):not(.center):hover .board-card-picture {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: occupied-card-perspective 1.15s ease-in-out infinite;
+    }
+    #board .cell.server-last-acting .board-card-picture {
+      filter: grayscale(.76) sepia(.68) saturate(1.12) hue-rotate(-7deg) brightness(1.08);
+      animation: none !important;
+    }
+    #board .last-acting-troop .board-card-picture {
+      filter: grayscale(.76) sepia(.68) saturate(1.12) hue-rotate(-7deg) brightness(1.08);
+      animation: none !important;
+    }
+    #board .cell.server-last-acting .action-description-highlight {
+      display: none;
+    }
+    #board .cell.server-last-acting > .hex,
+    #board .cell.server-last-acting > .hex-border-overlay,
+    #board .cell.server-last-acting > .bash-border {
+      fill: transparent !important;
+      stroke: transparent !important;
+    }
+    #board .cell.server-pending-deployment > .hex,
+    #board .cell.server-pending-deployment > .bash-border {
+      fill: transparent !important;
+      stroke: transparent !important;
+    }
+    #board .cell.server-pending-deployment .action-description-highlight {
+      display: none;
+    }
+    /* The PNG artwork owns the visible hex edge. Never let an interaction,
+       pending action, hover, or focus state resurrect an SVG outline. */
+    #board .cell > .hex,
+    #board .cell > .bash-border,
+    #board .cell:hover > .hex,
+    #board .cell:focus > .hex,
+    #board .cell:focus-visible > .hex {
+      stroke: none !important;
+      stroke-width: 0 !important;
+      stroke-dasharray: none !important;
+      outline: none !important;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #board .cell.server-occupied:hover .board-card-picture { animation: none; }
+      #board .board-unit-visual.deploy-fall-animation { animation: none; }
+      #board .board-unit-visual.troop-move-out-animation,
+      #board .board-unit-visual.troop-move-in-animation,
+      #board .board-unit-visual.troop-push-in-animation { animation: none; }
+    }
+    /* Selection is communicated by the action controls, not another card frame. */
+    .troop-card.selected-card,
+    .game-layout:not(.deck-building) .troop-tray .troop-card.selected-card {
+      box-shadow: none;
+      transform: none;
+    }
+    .troop-card.selected-card .troop-card-frame,
+    .troop-card.inactive-player-card .troop-card-frame,
+    .troop-card.unavailable-card .troop-card-frame,
+    .troop-card.undeployable-card .troop-card-frame {
+      filter: none;
+      opacity: 1;
+    }
+    .troop-card.inactive-player-card,
+    .troop-card.unavailable-card,
+    .troop-card.undeployable-card {
+      opacity: 1;
+      filter: none;
+    }
+    .troop-card.inactive-player-card .troop-card-artwork,
+    .troop-card.unavailable-card .troop-card-artwork,
+    .troop-card.undeployable-card .troop-card-artwork {
+      opacity: .42;
+    }
     #hover-details {
       position: fixed;
       bottom: .85rem;
@@ -483,25 +756,32 @@
     #hover-details[hidden] { display: none; }
     #hover-details .hover-card {
       position: relative;
-      overflow: hidden;
+      overflow: visible;
       display: grid;
       grid-template-columns: minmax(0, 1fr) 4.5rem;
       min-height: 5.5rem;
-      border: 2px solid #64748b;
+      border: 0;
       border-radius: .65rem;
-      background: linear-gradient(145deg, rgb(30 41 59 / .98), rgb(19 28 46 / .98));
-      box-shadow: 0 .6rem 1.4rem rgb(0 0 0 / .36);
+      background: transparent;
+      box-shadow: none;
     }
     #hover-details .hover-card.server-owner-one { border-color: #ef4444; }
     #hover-details .hover-card.server-owner-two { border-color: #3b82f6; }
     #hover-details .hover-card-copy {
+      position: relative;
+      z-index: 4;
       display: flex;
       min-width: 0;
       flex-direction: column;
       justify-content: center;
       padding: .65rem .7rem .65rem .85rem;
     }
-    #hover-details .card-visual { border-left: 1px solid #64748b; }
+    #hover-details .troop-card-artwork { border-radius: .25rem; }
+    #hover-details .troop-card-frame {
+      inset: -.6rem;
+      background-size: 103% 110%;
+    }
+    #hover-details .card-visual { border-left: 0; }
     #hover-details strong { display: block; margin-bottom: .18rem; color: #f8fafc; font-size: 1.04rem; }
     #hover-details .hover-detail-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #hover-details .hover-rule-list {
@@ -510,8 +790,9 @@
       margin-top: .25rem;
     }
     #hover-details .hover-rule-line {
-      color: #cbd5e1;
+      color: #f1f5f9;
       font-size: .88rem;
+      font-weight: 700;
       line-height: 1.28;
       overflow: visible;
       white-space: normal;
@@ -532,7 +813,7 @@
       display: grid;
       place-items: center;
       padding: 1rem;
-      background: rgb(15 23 42 / .78);
+      background: transparent;
       z-index: 10;
     }
     #troop-inspector[hidden] { display: none; }
@@ -540,10 +821,10 @@
       position: relative;
       width: min(94vw, 720px);
       padding: 1rem;
-      border: 1px solid #64748b;
+      border: 0;
       border-radius: .7rem;
-      background: #111827;
-      box-shadow: 0 1rem 3rem rgb(0 0 0 / .45);
+      background: transparent;
+      box-shadow: none;
     }
     #inspector-close {
       position: absolute;
@@ -558,7 +839,7 @@
       line-height: 1;
     }
     #inspector-content { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-    .inspector-card { padding: .85rem; border: 1px solid #64748b; border-radius: .5rem; background: #172033; }
+    .inspector-card { padding: .85rem; border: 0; border-radius: .5rem; background: transparent; }
     .inspector-card.player-one-inspector { border-color: #fb7185; }
     .inspector-card.player-two-inspector { border-color: #60a5fa; }
     .inspector-card h2 { margin: 0 0 .5rem; font-size: 1rem; }
@@ -575,10 +856,10 @@
       width: fit-content;
       max-width: 100%;
       padding: .35rem .45rem;
-      border: 1px solid rgb(71 85 105 / .5);
+      border: 0;
       border-radius: .65rem;
-      background: rgb(15 23 42 / .78);
-      box-shadow: 0 .35rem 1rem rgb(0 0 0 / .18);
+      background: transparent;
+      box-shadow: none;
     }
     #action-bar:empty { display: none; }
     #action-bar button { border: 1px solid #64748b; border-radius: .35rem; background: #172033; color: #e2e8f0; padding: .35rem .6rem; cursor: pointer; }
@@ -587,24 +868,123 @@
     #connection-status { min-height: 1.25rem; margin: .35rem 0 0; text-align: center; color: #94a3b8; font-size: .82rem; }
     #connection-status.connected { color: #86efac; }
     #connection-status.reconnecting, #connection-status.disconnected { color: #fcd34d; }
-    .screen { width: min(30rem, 92vw); padding: 1.65rem; border: 1px solid #475569; border-radius: 1rem; background: linear-gradient(145deg, rgb(30 41 59 / .98), rgb(15 23 42 / .98)); box-shadow: 0 1.25rem 3.5rem rgb(0 0 0 / .38); }
+    .screen { width: min(30rem, 92vw); padding: 1.65rem; border: 0; border-radius: 1rem; background: transparent; box-shadow: none; }
     .screen[hidden], main[hidden] { display: none; }
     .screen h1 { margin-top: 0; letter-spacing: -.025em; }
     .screen form, .screen nav { display: grid; gap: .75rem; }
     .screen nav[hidden] { display: none; }
     .screen input, .screen button { padding: .68rem .8rem; border: 1px solid #64748b; border-radius: .5rem; background: #111827; color: #f8fafc; font: inherit; }
+    .screen input { background: transparent; }
     .screen button { cursor: pointer; transition: background .14s ease, border-color .14s ease, transform .14s ease, opacity .14s ease; }
     .screen button:not(:disabled):hover, .screen button:not(:disabled):focus-visible { border-color: #cbd5e1; background: #273449; transform: translateY(-1px); outline: none; }
     .screen button:disabled { cursor: not-allowed; opacity: .42; }
-    #deck-readiness { min-height: 2.5rem; margin: .9rem 0 0; padding: .65rem .75rem; border: 1px solid #475569; border-radius: .55rem; background: rgb(15 23 42 / .62); color: #fcd34d; font-size: .9rem; line-height: 1.3; }
+    /* Hand-drawn UI frames. Keep card interiors transparent so the parchment
+       remains visible; optional card art is supplied by a separate faint layer. */
+    button:not(.troop-card) {
+      border-color: transparent !important;
+      border-radius: 0 !important;
+      background-color: transparent !important;
+      background-image: url('./assets/button.png') !important;
+      background-position: center !important;
+      background-size: 110% 120% !important;
+      background-repeat: no-repeat !important;
+    }
+    .troop-card,
+    .troop-card:hover,
+    .troop-card:focus-visible,
+    .troop-card.undeployable-card:hover,
+    .troop-card.inactive-player-card:hover,
+    .troop-card.selected-card,
+    .troop-card.unavailable-card:hover,
+    .hero-card {
+      border: 0 !important;
+      border-radius: 0;
+      background: transparent;
+    }
+    #deck-readiness { min-height: 2.5rem; margin: .9rem 0 0; padding: .65rem .75rem; border: 0; border-radius: .55rem; background: transparent; color: #fcd34d; font-size: .9rem; line-height: 1.3; }
     #deck-readiness.ready { color: #86efac; border-color: rgb(34 197 94 / .45); }
+    /* Transparent panels need their typography to remain readable over both
+       parchment and illustrated artwork. */
+    .screen,
+    #hover-details,
+    #troop-inspector,
+    #action-bar,
+    #connection-status {
+      text-shadow: 0 1px 1px #000, 0 0 3px #000, 0 0 6px #000;
+      -webkit-text-stroke: .6px #000;
+    }
+    .screen button,
+    #hover-details strong,
+    #hover-details .hover-detail-line,
+    #hover-details .hover-rule-line,
+    #troop-inspector button,
+    #troop-inspector h2,
+    #troop-inspector p,
+    #troop-inspector li,
+    #action-bar,
+    #action-bar button {
+      color: #f8fafc;
+      font-weight: 700;
+    }
+    .screen { font-size: 1.12rem; font-weight: 700; }
+    .screen h1 { font-size: 2.25rem; font-weight: 700; }
+    #hover-details { font-size: 1.2rem; font-weight: 700; line-height: 1.32; }
+    #hover-details strong { font-size: 1.42rem; }
+    #hover-details .hover-rule-line { font-size: 1.12rem; }
+    #hover-details .card-health {
+      font-size: 1.48rem;
+      transform: translate(-.35rem, -.3rem);
+    }
+    .troop-card img.troop-symbol {
+      width: 1.62rem;
+      height: 1.62rem;
+      transform: translateY(-.32rem);
+      filter: drop-shadow(0 1px 1px rgb(0 0 0 / .72)) drop-shadow(0 0 1px rgb(0 0 0 / .55));
+    }
+    #hover-details img.troop-symbol {
+      width: 2.2rem;
+      height: 2.2rem;
+      transform: translateX(-.35rem);
+      filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 2px #000);
+    }
+    #troop-inspector { font-size: 1.08rem; font-weight: 700; }
+    #action-bar { font-size: 1.08rem; font-weight: 700; }
+    button:not(.troop-card) {
+      font-family: "Kalam", "Segoe Print", "Bradley Hand", cursive !important;
+      color: #fff1cf !important;
+      font-size: 1.16rem;
+      font-weight: 700;
+      letter-spacing: .025em;
+      text-shadow:
+        0 1.5px 0 #000,
+        1px 0 0 #000,
+        -1px 0 0 #000,
+        0 0 3px #000,
+        0 0 7px rgb(0 0 0 / .95);
+      -webkit-text-stroke: .8px rgb(8 10 15 / .98);
+      paint-order: stroke fill;
+    }
+    button:not(.troop-card):not(:disabled):hover,
+    button:not(.troop-card):not(:disabled):focus-visible {
+      color: #fffbdc !important;
+      text-shadow:
+        0 1.5px 0 #000,
+        1px 0 0 #000,
+        -1px 0 0 #000,
+        0 0 4px #000,
+        0 0 9px rgb(255 241 207 / .34);
+    }
+    button:not(.troop-card):disabled {
+      color: #d8cfb9 !important;
+      -webkit-text-stroke-width: .65px;
+    }
     #login-error { min-height: 1.25rem; color: #fca5a5; }
     #play-format-error { min-height: 1.25rem; color: #fca5a5; }
     @media (max-width: 900px) {
       body { place-items: start center; overflow: auto; }
       main { height: auto; min-height: 100dvh; }
       .game-layout:not(.deck-building) { grid-template-columns: 1fr 1fr; height: auto; }
-      .game-layout:not(.deck-building) .board-area { grid-column: 1 / -1; grid-row: 1; justify-self: center; width: min(100%, 34rem); }
+      .game-layout:not(.deck-building) .board-area { grid-column: 1 / -1; grid-row: 1; justify-self: center; width: 100%; height: auto; max-width: 48rem; }
       .game-layout:not(.deck-building) .troop-tray { grid-row: 2; height: min(45dvh, 30rem); }
       .game-layout.deck-building { height: calc(100dvh - 4.5rem); }
     }
@@ -707,13 +1087,20 @@
         <div id="player-two-cards" class="card-list" aria-label="Blue player cards"></div>
       </aside>
       <div class="board-area">
-        <div class="board-region-key" aria-label="Board region patterns">
-          <span class="starting">Starting</span>
-          <span class="intermediate">Intermediate</span>
-          <span class="front-line">Front line</span>
-        </div>
-        <svg id="board" viewBox="135 15 530 590" role="img" aria-label="Hexagonal axial coordinate grid">
+        <svg id="board" viewBox="-20 50 840 530" role="img" aria-label="Horizontally stretched hexagonal axial coordinate grid">
           <defs aria-hidden="true">
+            <!-- A shrunken copy of the same hex shape is blurred inside a
+                 normalized mask, so opacity is based on distance from each
+                 hex edge rather than radial distance from the centre. -->
+            <filter id="info-hex-mask-blur" x="-10%" y="-10%" width="120%" height="120%"
+                    filterUnits="objectBoundingBox" primitiveUnits="objectBoundingBox">
+              <feGaussianBlur stdDeviation=".035"></feGaussianBlur>
+            </filter>
+            <mask id="info-hex-edge-fade" x="0" y="0" width="1" height="1"
+                  maskUnits="objectBoundingBox" maskContentUnits="objectBoundingBox">
+              <polygon points=".95,.5 .8,.05 .2,.05 .05,.5 .2,.95 .8,.95"
+                       fill="white" filter="url(#info-hex-mask-blur)"></polygon>
+            </mask>
             <pattern id="red-starting-region" width="12" height="12" patternUnits="userSpaceOnUse">
               <rect width="12" height="12" fill="#ef4444" fill-opacity=".10"></rect>
               <path d="M-3 3L3-3M0 12L12 0M9 15L15 9" stroke="#fb7185" stroke-opacity=".18" stroke-width="1.4"></path>

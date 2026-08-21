@@ -34,7 +34,7 @@ export class MatchStore {
       deckChoices: { 1: undefined, 2: undefined },
       selections: { 1: undefined, 2: undefined },
       targetSelections: { 1: undefined, 2: undefined },
-      game: createGameState(),
+      game: createGameState({ 1: deckOne, 2: deckTwo }),
       diagnostics: { createdAt: new Date().toISOString(), snapshots: [] }
     };
     this.matches.set(id, match);
@@ -82,6 +82,7 @@ export class MatchStore {
     const id = randomUUID();
     const game = {
       activePlayer: state.activePlayer,
+      phase: state.phase ?? (state.pendingResolution ? 'end' : 'action'),
       winner: state.winner,
       units: state.units.map(({ currentHealth: _currentHealth, combat: _combat, ...unit }) => unit),
       effects: structuredClone(state.effects ?? []), bashes: structuredClone(state.bashes ?? []), bombs: structuredClone(state.bombs ?? []),
@@ -89,7 +90,9 @@ export class MatchStore {
       pendingResolutionQueue: structuredClone(state.pendingResolutionQueue ?? []),
       lastActingTroopId: structuredClone(state.lastActingTroopId ?? {}),
       defeatedTroopIds: [...(state.defeatedTroopIds ?? [])], revision: state.revision ?? 0,
-      events: structuredClone(state.events ?? []), triggerEvents: []
+      events: structuredClone(state.events ?? []), triggerEvents: [],
+      dashboard: structuredClone(state.dashboard ?? []), resolutionStack: [...(state.resolutionStack ?? [])], currentEventId: state.currentEventId, nextDashboardId: state.nextDashboardId ?? 1,
+      deckOrder: { 1: [...state.decks[1]], 2: [...state.decks[2]] }
     };
     for (const bash of game.bashes) {
       const attacker = game.units.find(unit => unit.id === bash.attackerId || `${unit.owner}:${unit.troopId}` === bash.attackerId);
@@ -184,6 +187,7 @@ export class MatchStore {
       revision: match.game.revision,
       status: match.game.winner ? 'finished' : match.status,
       activePlayer: match.game.activePlayer,
+      phase: match.game.phase ?? (match.game.pendingResolution ? 'end' : 'action'),
       players: { ...match.players },
       sandbox: Boolean(match.sandboxOwner), sandboxSide: match.sandboxSide, sandboxFreePlacement: Boolean(match.sandboxFreePlacement), sandboxUndoAvailable: Boolean(match.sandboxOwner && match.sandboxUndo),
       format: match.format,
@@ -207,6 +211,9 @@ export class MatchStore {
       bombs: structuredClone(match.game.bombs ?? []),
       pendingResolution: structuredClone(match.game.pendingResolution),
       triggerEvents: structuredClone(match.game.triggerEvents?.slice(-100) ?? []),
+      dashboard: structuredClone(match.game.dashboard ?? []),
+      resolutionStack: [...(match.game.resolutionStack ?? [])],
+      currentEventId: match.game.currentEventId,
       lastActingTroopId: { ...(match.game.lastActingTroopId ?? {}) },
       winner: match.game.winner,
       control: controlSummary(match.game, this.cardsById),
@@ -255,6 +262,11 @@ export class MatchStore {
       match.targetSelections ??= { 1: undefined, 2: undefined };
       match.sandboxFreePlacement ??= false;
       match.game.bombs ??= [];
+      match.game.phase ??= match.game.pendingResolution ? 'end' : 'action';
+      match.game.dashboard ??= [];
+      match.game.resolutionStack ??= [];
+      match.game.nextDashboardId ??= (match.game.dashboard.at(-1)?.id ?? 0) + 1;
+      match.game.deckOrder ??= { 1: [...match.decks[1]], 2: [...match.decks[2]] };
       match.diagnostics ??= { createdAt: new Date().toISOString(), snapshots: [] };
       for (const bash of match.game?.bashes ?? []) {
         const attacker = match.game.units.find(unit => unit.id === bash.attackerId || `${unit.owner}:${unit.troopId}` === bash.attackerId);

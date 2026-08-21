@@ -2,6 +2,7 @@ import {
   troopSeeds,
   type AttackAction,
   type ContinuousEffect,
+  type LegacyActionView,
   type RegionType,
   type TroopAction,
   type TroopRole,
@@ -29,13 +30,14 @@ export interface Troop {
   ruleDescription?: string;
   deploymentRule?: 'enemy-region';
   selfDefense?: number;
+  control?: number;
   baseHealth: number;
   rangedDamageBonus?: number;
   rangedRangeBonus?: number;
   magicDamageBonus?: number;
   magicRangeBonus?: number;
   continuousEffects?: readonly ContinuousEffect[];
-  staticAuras?: Array<{ ability: 'attack' | 'magic'; left: number; right: number; sourceCardId: string }>;
+  staticAuras?: Array<{ ability: 'move' | 'attack' | 'magic'; left: number; right: number; sourceCardId: string }>;
   upgrades?: Array<{ ability?: UpgradableAbility; left?: number; right?: number; sourceUnitId?: string }>;
   coordinate?: Coordinate;
   permanentDamage: number;
@@ -123,7 +125,7 @@ export function healthDescription(troop: Troop): string {
 }
 
 export function rangedDamage(troop: Troop, attack: AttackAction): number {
-  return (attack.damage ?? healthOf(troop)) + (troop.rangedDamageBonus ?? 0);
+  return (attack.usesHealth ? healthOf(troop) : attack.damage) + (troop.rangedDamageBonus ?? 0);
 }
 
 export function rangedRange(troop: Troop, attack: AttackAction): number {
@@ -139,7 +141,7 @@ export function upgradeBonus(troop: Troop, ability?: UpgradableAbility): { left:
     }), { left: 0, right: 0 });
 }
 
-export function staticAuraBonus(troop: Troop, ability: 'attack' | 'magic'): { left: number; right: number } {
+export function staticAuraBonus(troop: Troop, ability: 'move' | 'attack' | 'magic'): { left: number; right: number } {
   return (troop.staticAuras ?? []).filter(aura => aura.ability === ability).reduce((total, aura) => ({
     left: total.left + aura.left,
     right: total.right + aura.right
@@ -153,8 +155,20 @@ export function permanentUpgradeBonus(troop: Troop, ability: 'attack' | 'magic')
     : { left: troop.magicDamageBonus ?? 0, right: troop.magicRangeBonus ?? 0 };
 }
 
-export function actionOfType<Type extends TroopAction['type']>(troop: Troop, type: Type): Extract<TroopAction, { type: Type }> | undefined {
-  return troop.actions.find(action => action.type === type) as Extract<TroopAction, { type: Type }> | undefined;
+function cardActionType(action: TroopAction): UpgradableAbility {
+  if (action.kind === 'fly') return 'fly';
+  if (action.kind === 'ranged') return 'attack';
+  if (action.kind === 'cannon') return 'cannon';
+  if (action.kind === 'fire') return 'magic';
+  return action.kind as UpgradableAbility;
+}
+
+export function actionOfType(troop: Troop, type: UpgradableAbility): LegacyActionView | undefined {
+  const action = troop.actions.find(candidate => cardActionType(candidate) === type);
+  if (!action) return undefined;
+  const values = Array.isArray(action.amount) ? action.amount : [action.amount ?? 0];
+  const first = values[0] ?? 0; const second = values[1] ?? 0;
+  return { type, range: action.range, amount: first, maxDistance: type === 'move' || type === 'fly' ? action.range : first, damage: first, block: first, left: first, right: second, usesHealth: type === 'attack' && action.amount === undefined };
 }
 
 export function serverCardDetails(troop: Troop): string[] {
@@ -173,7 +187,7 @@ export function serverCardDetails(troop: Troop): string[] {
     return bonus.left || bonus.right ? `🔮 ${text}` : text;
   };
   return [
-    move && move.maxDistance > 1 ? detail('move', `🥾 ${move.maxDistance + upgradeBonus(troop, 'move').right}`) : '',
+    move && move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right > 1 ? detail('move', `🥾 ${move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right}`) : '',
     fly ? detail('fly', `🪽 ${fly.maxDistance + upgradeBonus(troop, 'fly').right}`) : '',
     attack ? detail('attack', `${rangedDamage(troop, attack) + upgradeBonus(troop, 'attack').left + staticAuraBonus(troop, 'attack').left} 🏹 ${rangedRange(troop, attack) + upgradeBonus(troop, 'attack').right + staticAuraBonus(troop, 'attack').right}`) : '',
     defense ? detail('defense', `${defense.block + upgradeBonus(troop, 'defense').left} 🛡️ ${defense.range + upgradeBonus(troop, 'defense').right}`) : '',
@@ -183,7 +197,8 @@ export function serverCardDetails(troop: Troop): string[] {
     push ? detail('push', `${push.maxDistance + upgradeBonus(troop, 'push').left}${pushIcon}${push.range + upgradeBonus(troop, 'push').right}`) : '',
     mending ? detail('mending', `${mending.amount + upgradeBonus(troop, 'mending').left} ❤️ ${mending.range + upgradeBonus(troop, 'mending').right}`) : '',
     upgrade ? detail('upgrade', `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`) : '',
-    troop.passiveDescription ?? ''
+    troop.control ? `Control ${troop.control}` : '',
+    ...(troop.passiveDescription?.split('\n') ?? [])
   ].filter(Boolean);
 }
 
@@ -211,7 +226,7 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
   const selfBonus = bonus('self-defense');
 
   if (includeSelfBlock || (troop.selfDefense ?? 1) + selfBonus.left > 1) abilities.push({ text: `${(troop.selfDefense ?? 1) + selfBonus.left} 🛡️`, action: 'self-defense', upgraded: Boolean(selfBonus.left) });
-  if (move) { const value = bonus('move'); if (move.maxDistance + value.right > 1 || revealMoveOne) abilities.push({ text: `🥾 ${move.maxDistance + value.right}`, action: 'move', upgraded: Boolean(value.right) }); }
+  if (move) { const value = bonus('move'); const aura = staticAuraBonus(troop, 'move'); if (move.maxDistance + value.right + aura.right > 1 || revealMoveOne) abilities.push({ text: `🥾 ${move.maxDistance + value.right + aura.right}`, action: 'move', upgraded: Boolean(value.right), staticRight: Boolean(aura.right) }); }
   if (fly) { const value = bonus('fly'); abilities.push({ text: `🪽 ${fly.maxDistance + value.right}`, action: 'fly', upgraded: Boolean(value.right) }); }
   if (attack) { const value = bonus('attack'); const aura = staticAuraBonus(troop, 'attack'); const permanent = permanentUpgradeBonus(troop, 'attack'); abilities.push({ text: `${rangedDamage(troop, attack) + value.left + aura.left} 🏹 ${rangedRange(troop, attack) + value.right + aura.right}`, action: 'attack', upgraded: Boolean(value.left || value.right), staticLeft: Boolean(aura.left || permanent.left), staticRight: Boolean(aura.right || permanent.right) }); }
   if (defense) { const value = bonus('defense'); abilities.push({ text: `${defense.block + value.left} 🛡️ ${defense.range + value.right}`, action: 'defense', upgraded: Boolean(value.left || value.right) }); }
@@ -221,22 +236,26 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
   if (push) { const value = bonus('push'); abilities.push({ text: `${push.maxDistance + value.left}${pushIcon}${push.range + value.right}`, action: 'push', upgraded: Boolean(value.left || value.right) }); }
   if (mending) { const value = bonus('mending'); abilities.push({ text: `${mending.amount + value.left} ❤️ ${mending.range + value.right}`, action: 'mending', upgraded: Boolean(value.left || value.right) }); }
   if (upgrade) abilities.push({ text: `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`, action: 'upgrade' });
+  if (troop.control) abilities.push({ text: `Control ${troop.control}` });
 
   // Health plus two content lines form the stable board summary. A passive
   // gets one of those lines whenever there is room; dots mean actual overflow.
   const visibleAbilities = abilities.slice(0, 2);
   const hiddenAbilities = abilities.length > 2;
-  if (troop.passiveDescription && visibleAbilities.length < 2) visibleAbilities.push({ text: troop.passiveDescription });
+  const passiveLines = troop.passiveDescription?.split('\n').filter(Boolean) ?? [];
+  visibleAbilities.push(...passiveLines.slice(0, Math.max(0, 2 - visibleAbilities.length)).map(text => ({ text })));
   while (visibleAbilities.length < 2) visibleAbilities.push({ text: '' });
-  const overflow = hiddenAbilities || (troop.passiveDescription && abilities.length >= 2) ? [{ text: '...' }] : [];
+  const shownPassiveLines = Math.max(0, 2 - Math.min(2, abilities.length));
+  const overflow = hiddenAbilities || passiveLines.length > shownPassiveLines ? [{ text: '...' }] : [];
   return [{ text: healthDescription(troop) }, ...visibleAbilities, ...overflow];
 }
 
 export function actionDetails(troop: Troop): string[] {
-  return troop.actions.map(action => {
+  return troop.actions.map(source => {
+    const action = actionOfType(troop, cardActionType(source))!;
     const bonus = upgradeBonus(troop, action.type);
     if (action.type === 'move') {
-      const distance = action.maxDistance + bonus.right;
+      const distance = action.maxDistance + bonus.right + staticAuraBonus(troop, 'move').right;
       return `🥾${distance} (move): up to ${distance} hex${distance === 1 ? '' : 'es'} through a clear path; entering an enemy starts a bash.`;
     }
     if (action.type === 'fly') {
@@ -283,13 +302,14 @@ export function actionDetails(troop: Troop): string[] {
 /** Complete plain-language rules shown by every in-game card preview. */
 export function cardRuleDetails(troop: Troop): string[] {
   const rules = [deploymentDescription(troop), ...actionDetails(troop)];
-  if (!troop.actions.some(action => action.type === 'move' || action.type === 'fly')) {
+  if (!troop.actions.some(action => cardActionType(action) === 'move' || cardActionType(action) === 'fly')) {
     rules.push('Movement: this unit cannot move.');
   }
   if (troop.selfDefense !== undefined) {
     const block = troop.selfDefense + upgradeBonus(troop, 'self-defense').left;
     rules.push(`${block}🛡️ (self block): add ${block} shield to itself when physically threatened.`);
   }
+  if (troop.control) rules.push(`Control ${troop.control}: this unit contributes ${troop.control} additional control to its current region.`);
   if (troop.ruleDescription) rules.push(troop.ruleDescription);
   return rules;
 }
@@ -317,7 +337,8 @@ export function fullEffectLines(troop: Troop): string[] {
   if (push) effects.push(`${push.maxDistance}${pushIcon}${push.range}`);
   if (mending) effects.push(`${mending.amount} ❤️ ${mending.range}`);
   if (upgrade) effects.push(`${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`);
-  if (troop.passiveDescription) effects.push(troop.passiveDescription);
+  if (troop.control) effects.push(`Control ${troop.control}`);
+  if (troop.passiveDescription) effects.push(...troop.passiveDescription.split('\n').filter(Boolean));
   return effects;
 }
 

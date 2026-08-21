@@ -1,9 +1,9 @@
 import type { UpgradableAbility } from './game/cards.js';
-import { adjacentCoordinates, hexDistance, regionAt, straightLine, toCoordinate, type Coordinate } from './game/board.js';
+import { adjacentCoordinates, hexDistance, regionAt, straightLine, toCoordinate, type Coordinate, type RegionId } from './game/board.js';
 import { combatSummary, type GameState, type UnitId, type UnitState } from './game/engine.js';
 import type { Player } from './game/types.js';
 import { addDeckCard, clearDeckSlots, completedDeckFormats, createDeckSlots, moveDeckCard, removeDeckCard, selectedDeckCards, swapDeckCards, type DeckFormat, type DeckSlots } from './client/deck-state.js';
-import type { GameActionType, ServerBashState, ServerEffectState, ServerLegalAction, ServerMatchState, ServerUnitState } from './client/protocol.js';
+import type { GameActionType, ServerBashState, ServerLegalAction, ServerMatchState, ServerUnitState } from './client/protocol.js';
 import { actionOfType, boardDescriptionEntries, cardRuleDetails, catalogueById, catalogueIds, compareTroopsForTray, createTroopView, deploymentDescription, fullEffectLines, hasDeploymentTarget, healthDescription, healthOf, permanentUpgradeBonus, pushIcon, rangedDamage, serverCardDetails, staticAuraBonus, threeLineSummary, trayRoleLabel, troopDisplayName, upgradeBonus, type Troop } from './client/troop-view.js';
 
 interface Point {
@@ -18,6 +18,7 @@ function requiredElement<T extends Element>(selector: string): T {
 }
 
 const boardPanel = requiredElement<SVGSVGElement>('#board');
+const boardAreaPanel = requiredElement<HTMLElement>('.board-area');
 const playerOneCardsPanel = requiredElement<HTMLElement>('#player-one-cards');
 const playerTwoCardsPanel = requiredElement<HTMLElement>('#player-two-cards');
 const actionBarPanel = requiredElement<HTMLElement>('#action-bar');
@@ -65,6 +66,11 @@ let matchSocket: WebSocket | undefined;
 let localMatchPlayer: Player | undefined;
 let serverMatch: ServerMatchState | undefined;
 let serverSelectedTroopId: string | undefined;
+let serverRequestedTroopId: string | undefined;
+let serverSelectionRequestPending = false;
+const playedDeploymentAnimations = new Set<string>();
+let confirmedDeploymentAnimationRevision: number | undefined;
+const bashHoverTimers = new WeakMap<SVGGElement, number>();
 let serverInspectedUnitId: string | undefined;
 let serverSelectedAction: GameActionType | undefined;
 let serverPendingAction: ServerLegalAction | undefined;
@@ -158,6 +164,8 @@ async function loadDeck(deckIndex: number): Promise<void> {
 function openMatchEntry(matchId: string): void {
   activeMatchId = matchId;
   serverMatch = undefined;
+  playedDeploymentAnimations.clear();
+  confirmedDeploymentAnimationRevision = undefined;
   menuScreenPanel.hidden = true;
   mainPanel.hidden = true;
   matchStatusPanel.textContent = `Match ${matchId.slice(0, 8)} is ready. The board will connect to the authoritative server state here.`;
@@ -187,7 +195,8 @@ function applyLocalPlayerView(match: ServerMatchState): Player | undefined {
   localMatchPlayer = local;
   document.body.classList.toggle('local-player-one', local === 1);
   document.body.classList.toggle('local-player-two', local === 2);
-  document.body.classList.add('board-player-two');
+  document.body.classList.toggle('active-player-one', match.activePlayer === 1);
+  document.body.classList.toggle('active-player-two', match.activePlayer === 2);
   matchStatusPanel.textContent = match.sandbox
     ? `Playground: controlling ${local === 1 ? 'Red' : 'Blue'}. Control follows each turn.`
     : local === 1 ? 'You are Red and take the first turn.' : 'You are Blue. Red takes the first turn.';
@@ -282,6 +291,20 @@ function cardVisual(troop: Troop, healthText: string): HTMLSpanElement {
 }
 
 function appendTroopCardContent(card: HTMLElement, troop: Troop, detailLines: readonly CardDetail[], healthText: string): void {
+  if (!missingCardArtwork.has(troop.cardId)) {
+    const artwork = document.createElement('img');
+    artwork.classList.add('troop-card-artwork');
+    artwork.src = `assets/cards/${cardArtworkFilename(troop.cardId)}`;
+    artwork.alt = '';
+    artwork.loading = 'lazy';
+    artwork.decoding = 'async';
+    artwork.setAttribute('aria-hidden', 'true');
+    artwork.addEventListener('error', () => {
+      missingCardArtwork.add(troop.cardId);
+      artwork.remove();
+    }, { once: true });
+    card.append(artwork);
+  }
   const copy = document.createElement('span');
   copy.classList.add('card-copy');
   const title = document.createElement('strong');
@@ -295,7 +318,9 @@ function appendTroopCardContent(card: HTMLElement, troop: Troop, detailLines: re
     details.append(line);
   }
   copy.append(title, details);
-  card.append(copy, cardVisual(troop, healthText));
+  const frame = document.createElement('span');
+  frame.classList.add('troop-card-frame');
+  card.append(copy, cardVisual(troop, healthText), frame);
 }
 
 function createTroopDragPreview(troop: Troop, owner?: Player): HTMLElement {
@@ -346,7 +371,7 @@ function boardCellAtPoint(x: number, y: number): SVGGElement | undefined {
 
 function dropBoardTroop(dragged: NonNullable<typeof draggedBoardTroop>, coordinate: Coordinate): void {
   if (dragged.mode === 'free') placeSandboxTroop(coordinate);
-  else sendServerAction({ type: 'deploy', troopId: dragged.troopId, coordinate });
+  else stageServerDeployment(dragged.troopId, coordinate);
 }
 
 function enablePointerBoardDrag(source: Element, troop: Troop, dragged: NonNullable<typeof draggedBoardTroop>): void {
@@ -413,12 +438,24 @@ function enablePointerBoardDrag(source: Element, troop: Troop, dragged: NonNulla
 function createHoverCard(troop: Troop): { card: HTMLElement; copy: HTMLElement } {
   const card = document.createElement('section');
   card.classList.add('hover-card', troop.owner === 1 ? 'server-owner-one' : 'server-owner-two');
+  const artwork = document.createElement('img');
+  artwork.classList.add('troop-card-artwork');
+  if (!missingCardArtwork.has(troop.cardId)) artwork.src = `assets/cards/${cardArtworkFilename(troop.cardId)}`;
+  artwork.alt = '';
+  artwork.decoding = 'async';
+  artwork.setAttribute('aria-hidden', 'true');
+  artwork.addEventListener('error', () => {
+    missingCardArtwork.add(troop.cardId);
+    artwork.remove();
+  }, { once: true });
   const copy = document.createElement('span');
   copy.classList.add('hover-card-copy');
   const heading = document.createElement('strong');
   heading.textContent = troopDisplayName(troop);
   copy.append(heading);
-  card.append(copy, cardVisual(troop, healthDescription(troop)));
+  const frame = document.createElement('span');
+  frame.classList.add('troop-card-frame');
+  card.append(artwork, copy, cardVisual(troop, healthDescription(troop)), frame);
   return { card, copy };
 }
 
@@ -441,10 +478,12 @@ function appendRichHoverRule(line: HTMLElement, troop: Troop, rule: string): voi
   if (!match && movement) {
     const ability = movement[1] === '🥾' ? 'move' : 'fly';
     const temporary = upgradeBonus(troop, ability);
-    line.append(document.createTextNode(`${movement[1]}${Number(movement[2]) - temporary.right}`));
+    const aura = ability === 'move' ? staticAuraBonus(troop, 'move') : { left: 0, right: 0 };
+    line.append(document.createTextNode(`${movement[1]}${Number(movement[2]) - temporary.right - aura.right}`));
     if (temporary.right) { const value = document.createElement('span'); value.classList.add('temporary-upgrade'); value.textContent = `+${temporary.right}`; line.append(value); }
+    if (aura.right) { const value = document.createElement('span'); value.classList.add('static-upgrade'); value.textContent = `+${aura.right}`; line.append(value); }
     appendBoldHoverCopy(line, movement[3]);
-    appendHoverUpgradeSources(line, troop, ability, []);
+    appendHoverUpgradeSources(line, troop, ability, (troop.staticAuras ?? []).filter(source => source.ability === ability).map(source => source.sourceCardId));
     return;
   }
   if (!match) { appendBoldHoverCopy(line, rule); return; }
@@ -500,6 +539,89 @@ function boardTroopIcon(role: Troop['role'], owner: Player, x: number, y: number
   return icon;
 }
 
+function cardArtworkFilename(cardId: string): string {
+  // New artwork is discovered by convention: assets/cards/<card-id>.png.
+  // Keep this one compatibility alias until the existing file is renamed.
+  return cardId === 'mole-artificer' ? 'mole-artificier.png' : `${cardId}.png`;
+}
+
+let boardCardMaskSequence = 0;
+const boardCardMasks = new Map<string, string>();
+const missingCardArtwork = new Set<string>();
+
+function boardCardEdgeMask(position: Point, width: number, height: number): string {
+  const defs = boardPanel.querySelector('defs');
+  const key = `${position.x},${position.y}`;
+  const existing = boardCardMasks.get(key);
+  if (existing && boardPanel.querySelector(existing.slice(4, -1))) return existing;
+  const id = `board-card-edge-fade-${boardCardMaskSequence++}`;
+  const left = position.x - width / 2;
+  const top = position.y - height / 2;
+
+  const mask = document.createElementNS(ns, 'mask');
+  mask.id = id;
+  mask.setAttribute('maskUnits', 'userSpaceOnUse');
+  mask.setAttribute('maskContentUnits', 'userSpaceOnUse');
+  mask.setAttribute('x', String(left));
+  mask.setAttribute('y', String(top));
+  mask.setAttribute('width', String(width));
+  mask.setAttribute('height', String(height));
+  // Firefox does not reliably blur an objectBoundingBox mask applied to an
+  // SVG image. Twenty sub-pixel hex bands produce the same edge-distance fade
+  // without relying on SVG filter behavior: transparent at the actual cell
+  // edge, fully opaque at 90% of the centre-to-edge distance.
+  for (let step = 1; step <= 20; step += 1) {
+    const scale = 1 - step * .005;
+    const polygon = document.createElementNS(ns, 'polygon');
+    polygon.setAttribute('points', Array.from({ length: 6 }, (_, index) => {
+      const angle = 60 * index * Math.PI / 180;
+      const x = position.x + (size - hexGap) * horizontalScale * scale * Math.cos(angle);
+      const y = position.y + (size - hexGap) * scale * Math.sin(angle);
+      return `${x},${y}`;
+    }).join(' '));
+    polygon.setAttribute('fill', 'white');
+    polygon.setAttribute('fill-opacity', String(step / 20));
+    mask.append(polygon);
+  }
+  defs?.append(mask);
+  const reference = `url(#${id})`;
+  boardCardMasks.set(key, reference);
+  return reference;
+}
+
+function boardCardImage(cardId: string, position: Point, clipId?: string): SVGImageElement {
+  const width = size * 2 * horizontalScale;
+  const height = size * 2;
+  const image = document.createElementNS(ns, 'image');
+  image.setAttribute('href', `assets/cards/${cardArtworkFilename(cardId)}`);
+  image.setAttribute('x', String(position.x - width / 2));
+  image.setAttribute('y', String(position.y - height / 2));
+  image.setAttribute('width', String(width));
+  image.setAttribute('height', String(height));
+  image.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+  image.setAttribute('mask', boardCardEdgeMask(position, width, height));
+  if (clipId) image.setAttribute('clip-path', `url(#${clipId})`);
+  image.classList.add('board-card-picture');
+  return image;
+}
+
+function boardCardMarker(troop: Troop, position: Point, clipId?: string): SVGGElement {
+  const marker = document.createElementNS(ns, 'g');
+  const fallback = boardTroopIcon(troop.role, troop.owner, position.x, position.y, 32);
+  if (missingCardArtwork.has(troop.cardId)) {
+    marker.append(fallback);
+    return marker;
+  }
+  const picture = boardCardImage(troop.cardId, position, clipId);
+  picture.addEventListener('load', () => fallback.remove(), { once: true });
+  picture.addEventListener('error', () => {
+    missingCardArtwork.add(troop.cardId);
+    picture.remove();
+  }, { once: true });
+  marker.append(fallback, picture);
+  return marker;
+}
+
 function isServerLastActing(owner: Player, troopId: string): boolean {
   return serverMatch?.lastActingTroopId?.[owner] === troopId;
 }
@@ -510,11 +632,12 @@ function selectServerTroop(troopId: string): void {
   if (!isInDeck || serverMatch.defeatedTroopIds.includes(`${localMatchPlayer}:${troopId}`)) return;
   serverActionError = undefined;
   serverInspectedUnitId = undefined;
-  serverSelectedTroopId = serverSelectedTroopId === troopId ? undefined : troopId;
-  serverSelectedAction = undefined;
-  serverPendingAction = undefined;
-  sendServerSelection(serverSelectedTroopId);
-  renderServerMatchState(serverMatch);
+  // Keep the current target set in place until the server returns the next
+  // one. This lets CSS transition directly between the two sets instead of
+  // briefly lowering every legal hex and raising the replacement set later.
+  serverRequestedTroopId = serverSelectedTroopId === troopId ? undefined : troopId;
+  serverSelectionRequestPending = true;
+  sendServerSelection(serverRequestedTroopId);
 }
 
 function appendCardRoleGroup(parent: ParentNode, role: Troop['role']): HTMLElement {
@@ -611,7 +734,7 @@ function clearServerBoardRender(): void {
   boardPanel.querySelectorAll<SVGElement>('[data-server-render], .board-troop, .board-troop-description, .action-land, .bash-stat, .bash-icon').forEach(element => element.remove());
   clearServerPreviewPath();
   for (const { cell } of cellsByCoordinate.values()) {
-    cell.classList.remove('server-controlled-one', 'server-controlled-two', 'server-contested', 'server-selected', 'server-selected-one', 'server-selected-two', 'server-last-acting', 'server-action-highlight', 'server-action-highlight-one', 'server-action-highlight-two', 'server-pending-target', 'server-pending-target-one', 'server-pending-target-two', 'server-remote-pending-target', 'server-reachable', 'server-bash-target');
+    cell.classList.remove('server-controlled-one', 'server-controlled-two', 'server-contested', 'server-occupied', 'server-selected', 'server-selected-one', 'server-selected-two', 'server-last-acting', 'server-action-highlight', 'server-action-highlight-one', 'server-action-highlight-two', 'server-pending-target', 'server-pending-target-one', 'server-pending-target-two', 'server-pending-deployment', 'server-remote-pending-target', 'server-reachable', 'server-bash-target');
     cell.removeAttribute('tabindex');
     cell.removeAttribute('role');
     cell.removeAttribute('aria-label');
@@ -621,13 +744,8 @@ function clearServerBoardRender(): void {
 function serverRegionController(match: ServerMatchState, coordinate: Coordinate, previewBash?: ServerBashState): Player | undefined {
   return serverControllerWithPreview(coordinate, previewBash, match);
 }
-/**
- * The board is permanently rotated into its Blue-bottom view. Counter-rotate
- * each overlay about its hex centre so artwork and statistics remain upright.
- */
-function keepServerOverlayUpright(element: SVGElement, centre: Point): void {
-  element.setAttribute('transform', `rotate(180 ${centre.x} ${centre.y})`);
-}
+/** The shared horizontal board needs no player-dependent overlay rotation. */
+function keepServerOverlayUpright(_element: SVGElement, _centre: Point): void {}
 
 function serverPreviewTargets(): Array<{ owner: Player; target: { troopId: string; type: GameActionType; coordinate: Coordinate } }> {
   if (!serverMatch) return [];
@@ -687,7 +805,7 @@ function serverPreviewBlock(unit: ServerUnitState, coordinate: Coordinate): numb
       const value = target.type === 'self-defense'
         ? (troop?.selfDefense ?? 1) + (troop ? upgradeBonus(troop, 'self-defense').left : 0)
         : (defense?.block ?? 0) + (troop ? upgradeBonus(troop, 'defense').left : 0);
-      return sum + value + (unit.troopId === 'river-otter' && source?.id !== unit.id ? 1 : 0);
+      return sum + value;
     }, 0);
 }
 
@@ -695,36 +813,74 @@ function serverModifierEntries(unit: ServerUnitState, coordinate: Coordinate, ba
   if (!serverMatch) return [];
   if (serverBashHasSteadyOpponent(unit, bash)) return [];
   const entries: Array<{ label: string; value: number }> = [];
-  const confirmedBlock = serverMatch.effects
-    .filter(effect => effect.kind === 'defense' && effect.owner === unit.owner && effect.target === coordinate)
-    .reduce((sum, effect) => sum + effect.value + (unit.troopId === 'river-otter' && effect.sourceUnitId !== unit.id ? 1 : 0), 0);
+  const confirmedShields = serverMatch.effects.filter(effect => effect.kind === 'defense' && effect.owner === unit.owner && effect.target === coordinate);
+  const confirmedBlock = confirmedShields.reduce((sum, effect) => sum + effect.value, 0);
   const previewBlock = serverPreviewBlock(unit, coordinate);
   const block = confirmedBlock + previewBlock;
   if (block) entries.push({ label: 'Shield', value: block });
-  if (block > 0 && unit.troopId === 'marsh-badger') entries.push({ label: 'Marsh Badger', value: -1 });
-  if (unit.troopId === 'alps-lone-wolf' && unit.permanentDamage > 0) entries.push({ label: 'Alps Lone Wolf', value: 2 });
-  if (bash?.attackerId === unit.id && unit.troopId === 'canyon-ibex') entries.push({ label: 'Canyon Ibex', value: 2 });
-  if (bash?.attackerId === unit.id && unit.troopId === 'crown-breaker') {
-    const defender = serverMatch.units.find(candidate => candidate.id === bash.defenderId);
-    if (defender && catalogueById.get(defender.troopId)?.role === 'hero') entries.push({ label: 'Crown Breaker', value: 2 });
+  const previewShieldSources = serverPreviewTargets()
+    .filter(({ owner, target }) => owner === unit.owner && target.coordinate === coordinate && (target.type === 'defense' || target.type === 'self-defense'))
+    .map(({ owner, target }) => serverMatch?.units.find(candidate => candidate.owner === owner && candidate.troopId === target.troopId))
+    .filter((source): source is ServerUnitState => Boolean(source));
+  const shieldedByAlly = confirmedShields.some(shield => (shield.sourceUnitId ?? `${shield.owner}:${shield.sourceTroopId}`) !== unit.id)
+    || previewShieldSources.some(source => source.id !== unit.id);
+  for (const source of serverMatch.units.filter(candidate => candidate.owner === unit.owner)) {
+    for (const effect of catalogueById.get(source.troopId)?.continuousEffects ?? []) {
+      if (effect.kind !== 'combat-modifier' || (effect.scope ?? 'self') === 'self' && source.id !== unit.id) continue;
+      const defender = bash ? serverMatch.units.find(candidate => candidate.id === bash.defenderId) : undefined;
+      const active = effect.condition === 'bash-attacker' ? bash?.attackerId === unit.id
+        : effect.condition === 'bash-attacker-vs-hero' ? bash?.attackerId === unit.id && catalogueById.get(defender?.troopId ?? '')?.role === 'hero'
+        : effect.condition === 'in-bash' ? Boolean(bash)
+        : effect.condition === 'injured' ? unit.permanentDamage > 0
+        : effect.condition === 'shielded' ? block > 0
+        : effect.condition === 'shielded-by-ally' ? shieldedByAlly
+        : false;
+      if (!active) continue;
+      const growth = source.id === unit.id && effect.condition === 'in-bash' ? unit.bashModifierBonus ?? 0 : 0;
+      entries.push({ label: effect.label, value: effect.value + growth });
+    }
   }
-  if (bash && serverMatch.units.some(candidate => candidate.owner === unit.owner && candidate.troopId === 'war-temple')) entries.push({ label: 'War Temple', value: 1 });
   if (bash && serverControllerWithPreview(coordinate, bash) === unit.owner) entries.push({ label: 'Control', value: 1 });
   return entries;
 }
 
 function serverModifier(unit: ServerUnitState, coordinate: Coordinate, bash?: ServerBashState): number {
-  if (!bash) return unit.combat.modifier + serverPreviewBlock(unit, coordinate);
+  if (!bash) {
+    const previewBlock = serverPreviewBlock(unit, coordinate);
+    if (!previewBlock || !serverMatch) return unit.combat.modifier + previewBlock;
+    const confirmedShields = serverMatch.effects.filter(effect => effect.kind === 'defense' && effect.owner === unit.owner && effect.target === coordinate);
+    const previewAllyShield = serverPreviewTargets()
+      .filter(({ owner, target }) => owner === unit.owner && target.coordinate === coordinate && (target.type === 'defense' || target.type === 'self-defense'))
+      .some(({ owner, target }) => serverMatch?.units.some(source => source.owner === owner && source.troopId === target.troopId && source.id !== unit.id));
+    const newlyShieldedPenalty = unit.troopId === 'marsh-badger' && confirmedShields.length === 0 ? -1 : 0;
+    const alreadyShieldedByAlly = confirmedShields.some(shield => (shield.sourceUnitId ?? `${shield.owner}:${shield.sourceTroopId}`) !== unit.id);
+    const newlySupportedBonus = unit.troopId === 'river-otter' && previewAllyShield && !alreadyShieldedByAlly ? 1 : 0;
+    return unit.combat.modifier + previewBlock + newlyShieldedPenalty + newlySupportedBonus;
+  }
   return serverModifierEntries(unit, coordinate, bash).reduce((total, entry) => total + entry.value, 0);
 }
 
-function appendServerBoardUnit(unit: ServerUnitState): void {
+function appendServerBoardUnit(unit: ServerUnitState, transition?: 'move-out' | 'move-in' | 'push-in', transitionOrigin?: Coordinate): void {
   const target = cellsByCoordinate.get(unit.coordinate); const troop = serverTroop(unit.troopId, unit.owner, unit);
   if (!target || !troop) return;
+  target.cell.classList.add('server-occupied');
   target.cell.setAttribute('tabindex', '0');
   target.cell.setAttribute('role', 'button');
   target.cell.setAttribute('aria-label', `${troopDisplayName(troop)}, Player ${unit.owner}`);
-  const marker = boardTroopIcon(troop.role, unit.owner, target.position.x, target.position.y + 21, 23); marker.dataset.serverRender = 'unit'; marker.classList.add('board-troop', unit.owner === 1 ? 'player-one-troop' : 'player-two-troop');
+  const visual = document.createElementNS(ns, 'g');
+  visual.dataset.serverRender = 'unit-visual';
+  visual.dataset.clipId = target.cell.dataset.clipId;
+  visual.classList.add('board-unit-visual');
+  if (transition) visual.classList.add(`troop-${transition}-animation`);
+  if (transition === 'push-in' && transitionOrigin) {
+    const origin = cellsByCoordinate.get(transitionOrigin)?.position;
+    if (origin) {
+      visual.style.setProperty('--push-from-x', `${origin.x - target.position.x}px`);
+      visual.style.setProperty('--push-from-y', `${origin.y - target.position.y}px`);
+    }
+  }
+  const marker = boardCardMarker(troop, target.position, target.cell.dataset.clipId);
+  marker.dataset.serverRender = 'unit'; marker.classList.add('board-troop', unit.owner === 1 ? 'player-one-troop' : 'player-two-troop');
   if (serverMatch?.sandboxFreePlacement) {
     marker.classList.add('sandbox-draggable');
     enablePointerBoardDrag(marker, troop, { owner: unit.owner, troopId: unit.troopId, mode: 'free' });
@@ -736,21 +892,48 @@ function appendServerBoardUnit(unit: ServerUnitState): void {
     target.cell.classList.add('server-last-acting');
   }
   if ((unit.owner === localMatchPlayer && unit.troopId === serverSelectedTroopId) || serverMatch?.selections?.[unit.owner] === unit.troopId || unit.id === serverInspectedUnitId) target.cell.classList.add('server-selected', unit.owner === 1 ? 'server-selected-one' : 'server-selected-two');
-  // Every overlay uses the same fixed Blue-bottom placement as the icon and
-  // is counter-rotated so its text stays upright.
+  // Every overlay uses the same shared horizontal board orientation.
   const highlightedAction = unit.owner === localMatchPlayer && unit.troopId === serverSelectedTroopId ? serverSelectedAction : undefined;
   const latestAction = serverMatch?.events?.at(-1);
   const newlyDeployed = latestAction?.action.type === 'deploy' && latestAction.player === unit.owner && latestAction.action.troopId === unit.troopId;
+  const deploymentPreview = unit.id.startsWith('deployment-preview:') && unit.owner === localMatchPlayer;
+  const confirmedForOpponent = newlyDeployed
+    && unit.owner !== localMatchPlayer
+    && serverMatch?.revision === confirmedDeploymentAnimationRevision;
+  const deploymentAnimationKey = deploymentPreview
+    ? `preview:${unit.owner}:${unit.troopId}:${unit.coordinate}`
+    : confirmedForOpponent
+      ? `confirmed:${serverMatch?.revision}:${unit.owner}:${unit.troopId}:${unit.coordinate}`
+      : undefined;
+  if (deploymentAnimationKey && !playedDeploymentAnimations.has(deploymentAnimationKey)) {
+    playedDeploymentAnimations.add(deploymentAnimationKey);
+    visual.classList.add('deploy-fall-animation');
+  }
   const persistedAction = latestAction && serverMatch?.activePlayer !== latestAction.player
     && latestAction.action.type !== 'deploy' && latestAction.player === unit.owner && latestAction.action.troopId === unit.troopId
     ? latestAction.action.type : undefined;
   const descriptionAction = highlightedAction ?? persistedAction;
+  const ignitionDamage = latestAction?.action.type === 'magic'
+    && latestAction.player === unit.owner
+    && latestAction.action.troopId === unit.troopId
+    ? serverMatch?.effects.filter(effect => effect.kind === 'bomb' && effect.owner === unit.owner).reduce((damage, effect) => Math.max(damage, effect.value), 0)
+    : undefined;
   const showSelfBlock = descriptionAction === 'self-defense';
   const pendingSelfBlock = descriptionAction === 'self-defense' && serverPendingAction?.type === 'self-defense';
-  appendServerActionDescriptionHighlight(target.cell, troop, target.position, descriptionAction, newlyDeployed, showSelfBlock, pendingSelfBlock);
-  const description = document.createElementNS(ns, 'text'); description.dataset.serverRender = 'description'; description.classList.add('board-troop-description'); writeServerBoardDescription(description, troop, target.position, showSelfBlock, descriptionAction === 'move');
+  // The unit remains one rigid animated object, but the transparent ornamental
+  // PNG is painted after it so the hand-drawn hex edge stays above the card.
+  const hexArtwork = target.cell.querySelector<SVGImageElement>('.board-hex-artwork');
+  visual.append(marker);
+  appendBoardInfoFrame(visual, troop, target.position);
+  appendServerActionDescriptionHighlight(visual, troop, target.position, descriptionAction, newlyDeployed, showSelfBlock, pendingSelfBlock, ignitionDamage);
+  const description = document.createElementNS(ns, 'text');
+  description.dataset.serverRender = 'description';
+  description.classList.add('board-troop-description');
+  writeServerBoardDescription(description, troop, target.position, showSelfBlock, descriptionAction === 'move', ignitionDamage);
   keepServerOverlayUpright(description, target.position);
-  target.cell.append(marker, description);
+  visual.append(description);
+  target.cell.append(visual);
+  if (hexArtwork) target.cell.append(hexArtwork);
 }
 
 function appendServerBash(bash: ServerBashState, showSplitBorder = true): void {
@@ -759,16 +942,22 @@ function appendServerBash(bash: ServerBashState, showSplitBorder = true): void {
   if (!target || !attacker || !defender) return;
   const attackerTroop = serverTroop(attacker.troopId, attacker.owner, attacker);
   const defenderTroop = serverTroop(defender.troopId, defender.owner, defender);
+  // Board sides are player-owned, independent of who initiated the bash:
+  // Red (Player 1) is always left and Blue (Player 2) is always right.
+  const sideUnits: [ServerUnitState, ServerUnitState] = attacker.owner === 1
+    ? [attacker, defender]
+    : [defender, attacker];
   target.cell.setAttribute('tabindex', '0');
   target.cell.setAttribute('role', 'button');
+  target.cell.classList.add('server-bash-target');
+  enableBashSideHover(target.cell);
   target.cell.setAttribute('aria-label', `${attackerTroop ? troopDisplayName(attackerTroop) : attacker.troopId} versus ${defenderTroop ? troopDisplayName(defenderTroop) : defender.troopId}`);
   if (showSplitBorder) {
     // The normal region-edge overlay is appended last.  Hide it on a bash so
     // it cannot paint a full control-colour outline over the two half-borders.
-    target.cell.classList.add('server-bash-target');
     const vertex = (index: number): Point => {
-      const angle = (60 * index - 30) * Math.PI / 180;
-      return { x: target.position.x + (size - hexGap) * Math.cos(angle), y: target.position.y + (size - hexGap) * Math.sin(angle) };
+      const angle = 60 * index * Math.PI / 180;
+      return { x: target.position.x + (size - hexGap) * horizontalScale * Math.cos(angle), y: target.position.y + (size - hexGap) * Math.sin(angle) };
     };
     const middle = (left: number, right: number): Point => {
       const a = vertex(left); const b = vertex(right);
@@ -798,21 +987,94 @@ function appendServerBash(bash: ServerBashState, showSplitBorder = true): void {
       target.cell.append(border);
     }
   }
-  const sword = document.createElementNS(ns, 'text');
-  sword.dataset.serverRender = 'bash'; sword.classList.add('bash-icon');
-  sword.setAttribute('x', String(target.position.x)); sword.setAttribute('y', String(target.position.y + 5)); sword.textContent = '⚔️';
-  keepServerOverlayUpright(sword, target.position);
-  target.cell.append(sword);
-  for (const unit of [attacker, defender]) {
-    const statY = target.position.y + (unit.owner === 2 ? 24 : -18);
-    const stat = document.createElementNS(ns, 'text'); stat.dataset.serverRender = 'bash'; stat.classList.add('bash-stat', unit.owner === 1 ? 'player-one-bash' : 'player-two-bash'); stat.setAttribute('x', String(target.position.x)); stat.setAttribute('y', String(statY)); stat.textContent = `${unit.combat.health} + ${serverModifier(unit, bash.target, bash)}`;
-    keepServerOverlayUpright(stat, target.position);
-    target.cell.append(stat);
+  for (const [index, unit] of sideUnits.entries()) {
+    const side = index === 0 ? 'left' : 'right';
+    const troop = serverTroop(unit.troopId, unit.owner, unit);
+    if (troop) {
+      const picture = boardCardMarker(troop, target.position);
+      picture.dataset.serverRender = 'bash-picture';
+      picture.classList.add('board-troop', 'bash-troop-picture', side === 'left' ? 'bash-left-picture' : 'bash-right-picture');
+      if (isServerLastActing(unit.owner, unit.troopId)) picture.classList.add('last-acting-troop');
+      keepServerOverlayUpright(picture, target.position);
+      target.cell.append(picture);
+    }
+  }
+  // Preserve the hand-drawn edge above both full-size, half-clipped pictures.
+  const hexArtwork = target.cell.querySelector<SVGImageElement>('.board-hex-artwork');
+  if (hexArtwork) target.cell.append(hexArtwork);
+
+  for (const [index, unit] of sideUnits.entries()) {
+    const statX = target.position.x + (index === 0 ? -18 : 18);
+    const ownerClass = unit.owner === 1 ? 'player-one-bash' : 'player-two-bash';
+    const side = index === 0 ? 'left' : 'right';
+    const ui = document.createElementNS(ns, 'g');
+    ui.dataset.serverRender = 'bash-ui';
+    ui.classList.add('bash-side-ui', `bash-${side}-ui`);
+    keepServerOverlayUpright(ui, target.position);
+    const health = document.createElementNS(ns, 'text');
+    health.dataset.serverRender = 'bash'; health.classList.add('bash-stat', 'bash-health', ownerClass);
+    health.setAttribute('x', String(statX)); health.setAttribute('y', String(boardDescriptionLineY(target.position, 2, 0)));
+    health.textContent = `♥ ${unit.currentHealth}`;
+    ui.append(health);
+    const modifierValue = serverModifier(unit, bash.target, bash);
+    const modifier = document.createElementNS(ns, 'text');
+    modifier.dataset.serverRender = 'bash'; modifier.classList.add('bash-stat', 'bash-modifier', ownerClass);
+    modifier.setAttribute('x', String(statX)); modifier.setAttribute('y', String(boardDescriptionLineY(target.position, 2, 0) + boardDescriptionLineHeight));
+    modifier.textContent = `${modifierValue >= 0 ? '+' : ''}${modifierValue}`;
+    ui.append(modifier);
+    const troop = serverTroop(unit.troopId, unit.owner, unit);
+    if (troop) {
+      const description = document.createElementNS(ns, 'text');
+      description.dataset.serverRender = 'bash-description';
+      description.classList.add('board-troop-description', 'bash-side-description', `bash-${side}-description`);
+      writeServerBoardDescription(description, troop, target.position);
+      description.querySelector('.board-health')?.remove();
+      keepServerOverlayUpright(description, target.position);
+      target.cell.append(description);
+    }
+    target.cell.append(ui);
   }
 }
 
+function enableBashSideHover(cell: SVGGElement): void {
+  if (cell.dataset.bashHoverBound) return;
+  cell.dataset.bashHoverBound = 'true';
+  const clearTimer = (): void => {
+    const timer = bashHoverTimers.get(cell);
+    if (timer !== undefined) window.clearTimeout(timer);
+    bashHoverTimers.delete(cell);
+    delete cell.dataset.bashPendingSide;
+  };
+  cell.addEventListener('pointermove', event => {
+    if (!cell.classList.contains('server-bash-target')) return;
+    const bounds = cell.getBoundingClientRect();
+    const side = event.clientX < bounds.left + bounds.width / 2 ? 'left' : 'right';
+    const wantedClass = `bash-focus-${side}`;
+    if (cell.classList.contains(wantedClass) || cell.dataset.bashPendingSide === side) return;
+    const changingSide = cell.classList.contains(side === 'left' ? 'bash-focus-right' : 'bash-focus-left');
+    clearTimer();
+    cell.classList.remove('bash-focus-left', 'bash-focus-right');
+    if (!changingSide) {
+      cell.classList.add(wantedClass);
+      return;
+    }
+    cell.dataset.bashPendingSide = side;
+    const timer = window.setTimeout(() => {
+      if (cell.matches(':hover') && cell.classList.contains('server-bash-target')) cell.classList.add(wantedClass);
+      bashHoverTimers.delete(cell);
+      delete cell.dataset.bashPendingSide;
+    }, 340);
+    bashHoverTimers.set(cell, timer);
+  });
+  cell.addEventListener('pointerleave', () => {
+    clearTimer();
+    cell.classList.remove('bash-focus-left', 'bash-focus-right');
+  });
+}
+
 interface ServerDamagePreview {
-  attacker: ServerUnitState;
+  attacker?: ServerUnitState;
+  owner: Player;
   target: ServerUnitState;
   coordinate: Coordinate;
   targetModifier: number;
@@ -821,6 +1083,16 @@ interface ServerDamagePreview {
   magic: boolean;
   /** The bash is replaced by this projected post-combat target. */
   replacesBash?: boolean;
+}
+
+type DamageType = 'attack' | 'magic' | 'cannon' | 'bomb';
+
+/** Shared rules calculator for every damage preview. New damage mechanics only
+ * need to map their type here instead of duplicating UI-specific arithmetic. */
+function calculatePreviewDamage(type: DamageType, rawDamage: number, currentHealth: number, physicalModifier: number): Pick<ServerDamagePreview, 'targetModifier' | 'damage' | 'magic'> {
+  if (type === 'magic') return { targetModifier: 0, damage: rawDamage >= currentHealth ? rawDamage : 0, magic: true };
+  if (type === 'cannon' || type === 'bomb') return { targetModifier: 0, damage: rawDamage, magic: false };
+  return { targetModifier: physicalModifier, damage: Math.max(0, rawDamage - physicalModifier), magic: false };
 }
 
 function serverBashIsDodged(bash: ServerBashState, match = serverMatch): boolean {
@@ -838,20 +1110,6 @@ function serverBashIsDodged(bash: ServerBashState, match = serverMatch): boolean
     && serverPendingAction.troopId === defender.troopId
     && (serverPendingAction.type === 'move' || serverPendingAction.type === 'fly')
     && serverPendingAction.coordinate !== bash.target);
-  return selectedMoveAway || localMoveAway;
-}
-
-function serverTargetMovedAway(target: ServerUnitState, coordinate: Coordinate, match: ServerMatchState): boolean {
-  const response = match.targetSelections?.[target.owner];
-  const selectedMoveAway = Boolean(response
-    && response.troopId === target.troopId
-    && (response.type === 'move' || response.type === 'fly')
-    && response.coordinate !== coordinate);
-  const localMoveAway = Boolean(serverPendingAction
-    && localMatchPlayer === target.owner
-    && serverPendingAction.troopId === target.troopId
-    && (serverPendingAction.type === 'move' || serverPendingAction.type === 'fly')
-    && serverPendingAction.coordinate !== coordinate);
   return selectedMoveAway || localMoveAway;
 }
 
@@ -905,43 +1163,32 @@ function serverOffensivePreviewTarget(match: ServerMatchState, attacker: ServerU
   return { target: survivor?.id === opponentId ? survivor : undefined, replacesBash: survivor?.id === opponentId };
 }
 
-function serverEffectTarget(effect: ServerEffectState, match: ServerMatchState): ServerUnitState | undefined {
-  const target = effect.targetUnitId
-    ? match.units.find(unit => unit.id === effect.targetUnitId)
-    : match.units.find(unit => unit.coordinate === effect.target);
-  if (!target || target.coordinate !== effect.target || serverTargetMovedAway(target, effect.target, match)) return undefined;
-  return target;
-}
-
 function createServerDamagePreview(
-  attacker: ServerUnitState,
+  attacker: ServerUnitState | undefined,
+  owner: Player,
   target: ServerUnitState,
   coordinate: Coordinate,
-  type: 'attack' | 'magic' | 'cannon' | 'bomb',
+  type: DamageType,
   rawDamage: number,
   match: ServerMatchState,
   replacesBash = false
 ): ServerDamagePreview {
   const bash = replacesBash ? undefined : match.bashes.find(item => item.target === coordinate
     && (item.attackerId === target.id || item.defenderId === target.id));
-  const magic = type === 'magic';
-  const blackMagic = type === 'cannon' || type === 'bomb';
-  const targetModifier = magic || blackMagic ? 0 : serverModifier(target, coordinate, bash);
-  // Magic only removes a troop when lethal; a non-lethal spell has no damage
-  // effect at all. It also ignores combat modifiers entirely.
-  const damage = magic ? (rawDamage >= target.currentHealth ? rawDamage : 0) : blackMagic ? rawDamage : Math.max(0, rawDamage - targetModifier);
+  const calculated = calculatePreviewDamage(type, rawDamage, target.currentHealth, serverModifier(target, coordinate, bash));
   // The marker communicates the resulting injury, independent of whether it
   // came from a ranged attack, cannon, or spell.
   const icon = '🩸';
-  return { attacker, target, coordinate, targetModifier, damage, icon, magic, replacesBash };
+  return { attacker, owner, target, coordinate, ...calculated, icon, replacesBash };
 }
 
-/** Calculate the damage marker for a local action or any confirmed pending effect. */
-function serverPendingDamagePreview(): ServerDamagePreview | undefined {
+/** Calculate every damage marker for a local action or confirmed effects. */
+function serverPendingDamagePreviews(): ServerDamagePreview[] {
   const match = serverMatch;
   const pending = serverPendingAction;
   const local = localMatchPlayer;
-  if (!match) return undefined;
+  if (!match) return [];
+  const previews: ServerDamagePreview[] = [];
   if (pending && pending.coordinate && local
     && (pending.type === 'attack' || pending.type === 'magic' || pending.type === 'cannon')) {
     const attacker = match.units.find(unit => unit.owner === local && unit.troopId === pending.troopId);
@@ -953,27 +1200,34 @@ function serverPendingDamagePreview(): ServerDamagePreview | undefined {
       const rawDamage = action.type === 'attack'
         ? rangedDamage(troop, action) + upgradeBonus(troop, 'attack').left
         : action.damage + upgradeBonus(troop, action.type).left;
-      return createServerDamagePreview(attacker, target, pending.coordinate, action.type, rawDamage, match, targetPreview.replacesBash);
+      previews.push(createServerDamagePreview(attacker, local, target, pending.coordinate, action.type, rawDamage, match, targetPreview.replacesBash));
     }
   }
 
+  const projectedUnits = serverPendingUnitPreviews();
+  const projectedById = new Map(projectedUnits.map(unit => [unit.id, unit]));
+  const unitsAtResolution = match.units.map(unit => projectedById.get(unit.id) ?? unit);
   for (const effect of match.effects) {
     if (effect.kind !== 'attack' && effect.kind !== 'magic' && effect.kind !== 'cannon' && effect.kind !== 'bomb') continue;
     const attacker = effect.sourceUnitId
       ? match.units.find(unit => unit.id === effect.sourceUnitId)
       : match.units.find(unit => unit.owner === effect.owner && unit.troopId === effect.sourceTroopId);
-    const target = serverEffectTarget(effect, match);
-    if (attacker && target) return createServerDamagePreview(attacker, target, effect.target, effect.kind, effect.value, match);
+    const targets = effect.kind === 'bomb'
+      ? unitsAtResolution.filter(unit => unit.coordinate === effect.target)
+      : effect.targetUnitId
+        ? [unitsAtResolution.find(unit => unit.id === effect.targetUnitId && unit.coordinate === effect.target)].filter((unit): unit is ServerUnitState => Boolean(unit))
+        : [unitsAtResolution.find(unit => unit.coordinate === effect.target)].filter((unit): unit is ServerUnitState => Boolean(unit));
+    for (const target of targets) previews.push(createServerDamagePreview(attacker, effect.owner, target, effect.target, effect.kind, effect.value, match));
   }
-  return undefined;
+  return previews;
 }
 
 /** Show target effectiveness above and effective damage below the target hex. */
 function appendServerDamagePreview(): void {
-  const preview = serverPendingDamagePreview();
-  if (!preview || serverHoverPreviewCoordinate === preview.coordinate) return;
+  for (const preview of serverPendingDamagePreviews()) {
+  if (serverHoverPreviewCoordinate === preview.coordinate) continue;
   const target = cellsByCoordinate.get(preview.coordinate);
-  if (!target) return;
+  if (!target) continue;
   const top = document.createElementNS(ns, 'text');
   top.dataset.serverRender = 'damage-preview';
   top.classList.add('bash-stat', preview.target.owner === 1 ? 'player-one-bash' : 'player-two-bash');
@@ -984,12 +1238,13 @@ function appendServerDamagePreview(): void {
 
   const bottom = document.createElementNS(ns, 'text');
   bottom.dataset.serverRender = 'damage-preview';
-  bottom.classList.add('bash-stat', preview.attacker.owner === 1 ? 'player-one-bash' : 'player-two-bash');
+  bottom.classList.add('bash-stat', preview.owner === 1 ? 'player-one-bash' : 'player-two-bash');
   bottom.setAttribute('x', String(target.position.x));
   bottom.setAttribute('y', String(target.position.y + 24));
   bottom.textContent = `${preview.damage} ${preview.icon}`;
   keepServerOverlayUpright(bottom, target.position);
   target.cell.append(top, bottom);
+  }
 }
 
 interface ServerMovementPreview {
@@ -1033,6 +1288,20 @@ function serverPendingUnitPreviews(): ServerUnitState[] {
   if (!match || !pending || !pending.coordinate) return [];
   const owner = serverPendingAction ? localMatchPlayer : match.activePlayer;
   if (!owner) return [];
+  if (pending.type === 'deploy') {
+    const troop = serverTroop(pending.troopId, owner);
+    if (!troop || match.units.some(unit => unit.coordinate === pending.coordinate)) return [];
+    const health = healthOf(troop);
+    return [{
+      id: `deployment-preview:${owner}:${pending.troopId}`,
+      troopId: pending.troopId,
+      owner,
+      coordinate: pending.coordinate,
+      permanentDamage: 0,
+      currentHealth: health,
+      combat: { health, modifier: 0, modifiers: [], total: health },
+    }];
+  }
   const source = match.units.find(unit => unit.owner === owner && unit.troopId === pending.troopId);
   if (!source) return [];
   if (pending.type === 'move' || pending.type === 'fly' || pending.type === 'push') {
@@ -1089,12 +1358,25 @@ function appendServerPreviewBash(): void {
 }
 
 function serverPreviewAt(coordinate: Coordinate): boolean {
-  if (serverPendingDamagePreview()?.coordinate === coordinate) return true;
+  if (serverPendingDamagePreviews().some(preview => preview.coordinate === coordinate)) return true;
   if (serverPendingBash()?.target === coordinate) return true;
   return Boolean(serverMatch?.bashes.some(bash => bash.target === coordinate && !serverBashIsDodged(bash, serverMatch)));
 }
 
 function setServerHoverPreview(coordinate: Coordinate, hovering: boolean, bashReveal: 'defender' | 'attacker' = 'defender'): void {
+  const animatedBash = serverPendingBash()?.target === coordinate
+    || Boolean(serverMatch?.bashes.some(bash => bash.target === coordinate && !serverBashIsDodged(bash, serverMatch)));
+  // Bash inspection is now an in-place, reversible left/right animation.
+  // The legacy hover preview rebuilt the board on pointer entry, destroying
+  // the animated nodes before their transitions could begin.
+  if (animatedBash) {
+    if (!hovering && serverHoverPreviewCoordinate === coordinate) {
+      serverHoverPreviewCoordinate = undefined;
+      if (serverMatch) renderServerMatchState(serverMatch);
+    }
+    return;
+  }
+  if (serverPendingAction?.type === 'bomb' && serverPendingAction.coordinate === coordinate) return;
   const next = hovering && serverPreviewAt(coordinate) ? coordinate : undefined;
   if (serverHoverPreviewCoordinate === next && (!next || serverBashReveal === bashReveal)) return;
   serverHoverPreviewCoordinate = next;
@@ -1113,18 +1395,19 @@ function appendServerHexBorderOverlays(): void {
   }
 }
 
-/** Bombs coexist with units and sit beside the lower-right hex vertex. */
+/** Unlit bombs coexist with units beside the same vertex used by the preview. */
 function appendServerBombs(match: ServerMatchState): void {
   for (const bomb of match.bombs ?? []) {
     const target = cellsByCoordinate.get(bomb.coordinate); if (!target) continue;
-    const marker = document.createElementNS(ns, 'text');
+    const marker = document.createElementNS(ns, 'image');
     marker.dataset.serverRender = 'bomb';
-    marker.setAttribute('x', String(target.position.x + 25));
-    marker.setAttribute('y', String(target.position.y + 20));
-    marker.setAttribute('font-size', '15');
-    marker.setAttribute('text-anchor', 'middle');
-    marker.textContent = '💣';
-    keepServerOverlayUpright(marker, target.position);
+    marker.classList.add('bomb-action-icon');
+    // Match the exact endpoint of appendServerBombActionPreview.
+    const horizontalOffset = (size - hexGap) * horizontalScale * .68;
+    const centre = { x: target.position.x + horizontalOffset, y: target.position.y };
+    marker.setAttribute('href', './assets/bomb-unlight.png');
+    marker.setAttribute('x', String(centre.x - 16.5)); marker.setAttribute('y', String(centre.y - 16.5));
+    marker.setAttribute('width', '33'); marker.setAttribute('height', '33');
     target.cell.append(marker);
   }
 }
@@ -1135,6 +1418,7 @@ function renderServerMatchState(match: ServerMatchState): void {
   // local selection echo. Clear the previous side's card/action before control
   // passes; both fixed trays share card IDs across their separate owners.
   const stateAdvanced = serverMatch?.id === match.id && serverMatch.revision !== match.revision;
+  confirmedDeploymentAnimationRevision = stateAdvanced ? match.revision : undefined;
   if (stateAdvanced) {
     serverSelectedTroopId = undefined;
     serverSelectedAction = undefined;
@@ -1145,6 +1429,15 @@ function renderServerMatchState(match: ServerMatchState): void {
   }
   serverMatch = match;
   const local = applyLocalPlayerView(match); if (!local) return;
+  if (serverSelectionRequestPending && match.selections?.[local] === serverRequestedTroopId) {
+    serverSelectedTroopId = serverRequestedTroopId;
+    serverSelectedAction = undefined;
+    serverPendingAction = undefined;
+    serverSelectionRequestPending = false;
+  }
+  const awaitingLocalAction = match.status === 'active' && !match.winner
+    && (match.pendingResolution?.owner ?? match.activePlayer) === local;
+  boardAreaPanel.classList.toggle('awaiting-local-action', awaitingLocalAction);
   if (match.pendingResolution?.owner === local) {
     const pending = match.pendingResolution;
     const source = 'sourceUnitId' in pending ? match.units.find(unit => unit.id === pending.sourceUnitId) : undefined;
@@ -1165,9 +1458,13 @@ function renderServerMatchState(match: ServerMatchState): void {
     const previewBash = serverPendingBash();
     const controller = serverRegionController(match, coordinate, previewBash);
     cell.classList.add(controller === 1 ? 'server-controlled-one' : controller === 2 ? 'server-controlled-two' : 'server-contested');
+    const regionId = regionAt(coordinate)?.id;
+    const artwork = cell.querySelector<SVGImageElement>('.board-hex-artwork');
+    const filename = controlledBoardHexArtwork(regionId, controller);
+    if (artwork && filename) artwork.setAttribute('href', `./assets/${filename}`);
   }
-  const damagePreview = serverPendingDamagePreview();
-  const replacedBashes = match.bashes.filter(bash => damagePreview?.replacesBash && bash.target === damagePreview.coordinate);
+  const damagePreviews = serverPendingDamagePreviews();
+  const replacedBashes = match.bashes.filter(bash => damagePreviews.some(preview => preview.replacesBash && bash.target === preview.coordinate));
   const visibleBashes = match.bashes.filter(bash => !serverBashIsDodged(bash, match)
     && bash.target !== serverHoverPreviewCoordinate
     && !replacedBashes.includes(bash));
@@ -1180,27 +1477,33 @@ function renderServerMatchState(match: ServerMatchState): void {
   const previewDefenderId = pendingBash?.defenderId;
   const revealPendingBash = pendingBash?.target === serverHoverPreviewCoordinate;
   const unitPreviews = serverPendingUnitPreviews();
+  const movementPreview = serverPendingMovementPreview();
+  const movementPreviewType = serverPendingActionForPreview()?.type;
   const previewUnitIds = new Set(unitPreviews.map(unit => unit.id));
-  const previewDamageTargetId = damagePreview?.target.id;
-  const revealDamageTarget = damagePreview?.coordinate === serverHoverPreviewCoordinate;
+  const previewDamageTargetIds = new Set(damagePreviews.map(preview => preview.target.id));
+  const revealDamageTargetIds = new Set(damagePreviews.filter(preview => preview.coordinate === serverHoverPreviewCoordinate).map(preview => preview.target.id));
   for (const unit of match.units) if (!bashingIds.has(unit.id)
     && (!revealedBashingIds.has(unit.id) || unit.id === revealedUnitId)
     && !replacedBashIds.has(unit.id)
     && (unit.id !== previewDefenderId || revealPendingBash)
     && !previewUnitIds.has(unit.id)
-    && (unit.id !== previewDamageTargetId || revealDamageTarget)) appendServerBoardUnit(unit);
-  for (const unit of unitPreviews) appendServerBoardUnit(unit);
-  if (damagePreview?.replacesBash && revealDamageTarget) appendServerBoardUnit(damagePreview.target);
+    && (!previewDamageTargetIds.has(unit.id) || revealDamageTargetIds.has(unit.id))) appendServerBoardUnit(unit);
+  // A pending move has two simultaneous visual halves: retain a temporary
+  // source copy that dissolves downward, while its projected destination copy
+  // materializes upward into the new hex.
+  if (movementPreview && movementPreviewType !== 'push') appendServerBoardUnit(movementPreview.unit, 'move-out');
+  for (const unit of unitPreviews) if (!previewDamageTargetIds.has(unit.id) || revealDamageTargetIds.has(unit.id)) {
+    const isMovementDestination = movementPreview?.unit.id === unit.id && movementPreview.coordinate === unit.coordinate;
+    const transition = isMovementDestination ? (movementPreviewType === 'push' ? 'push-in' : 'move-in') : undefined;
+    appendServerBoardUnit(unit, transition, movementPreview?.unit.coordinate);
+  }
+  for (const preview of damagePreviews) if (preview.replacesBash && revealDamageTargetIds.has(preview.target.id)) appendServerBoardUnit(preview.target);
   for (const effect of match.effects) {
     if (effect.kind === 'attack' || effect.kind === 'cannon' || effect.kind === 'bomb' || effect.kind === 'magic') {
       // The acting player's fill communicates pending damage without adding a
       // second, side-positioned damage label to the hex.
       cellsByCoordinate.get(effect.target)?.cell.classList.add('server-action-highlight', effect.owner === 1 ? 'server-action-highlight-one' : 'server-action-highlight-two');
     }
-  }
-  const latestEvent = match.events?.at(-1);
-  if (latestEvent?.origin && ['move', 'fly', 'push'].includes(latestEvent.action.type)) {
-    cellsByCoordinate.get(latestEvent.origin)?.cell.classList.add('server-action-highlight', latestEvent.player === 1 ? 'server-action-highlight-one' : 'server-action-highlight-two');
   }
   for (const bash of visibleBashes) appendServerBash(bash);
   // A pending bash is independent of bashes already waiting elsewhere on the
@@ -1225,6 +1528,63 @@ function renderServerMatchState(match: ServerMatchState): void {
   renderServerActionBar(match, local);
   renderServerActionTargets();
   appendServerHexBorderOverlays();
+  raiseActionTargetCells();
+  appendServerBombActionPreview();
+  confirmedDeploymentAnimationRevision = undefined;
+}
+
+function appendServerBombActionPreview(): void {
+  if (!serverMatch || serverSelectedAction !== 'bomb') return;
+  const source = selectedServerUnit();
+  if (!source) return;
+  const sourceCell = cellsByCoordinate.get(source.coordinate);
+  if (!sourceCell) return;
+  const horizontalOffset = (size - hexGap) * horizontalScale * .68;
+  const start: Point = { x: sourceCell.position.x - horizontalOffset, y: sourceCell.position.y };
+  const targetCoordinate = serverPendingAction?.type === 'bomb' ? serverPendingAction.coordinate : undefined;
+  const pendingTarget = targetCoordinate
+    ? cellsByCoordinate.get(targetCoordinate)
+    : undefined;
+  if (!pendingTarget || !targetCoordinate) {
+    const unlit = document.createElementNS(ns, 'image');
+    unlit.dataset.serverRender = 'bomb-action-preview';
+    unlit.classList.add('bomb-action-icon', 'bomb-unlit-preview');
+    unlit.setAttribute('href', './assets/bomb-unlight.png');
+    unlit.setAttribute('x', String(start.x - 18)); unlit.setAttribute('y', String(start.y - 18));
+    unlit.setAttribute('width', '36'); unlit.setAttribute('height', '36');
+    boardPanel.append(unlit);
+    return;
+  }
+
+  const end: Point = { x: pendingTarget.position.x + horizontalOffset, y: pendingTarget.position.y };
+  const control: Point = {
+    x: (start.x + end.x) / 2,
+    y: (start.y + end.y) / 2 - Math.max(42, hexDistance(source.coordinate, targetCoordinate) * 20),
+  };
+  const pathData = `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`;
+  const trajectory = document.createElementNS(ns, 'path');
+  trajectory.dataset.serverRender = 'bomb-action-preview';
+  trajectory.classList.add('bomb-pencil-trajectory');
+  trajectory.setAttribute('d', pathData); trajectory.setAttribute('pathLength', '1');
+  boardPanel.append(trajectory);
+
+  const moving = document.createElementNS(ns, 'g');
+  moving.dataset.serverRender = 'bomb-action-preview'; moving.classList.add('bomb-flight');
+  const bomb = document.createElementNS(ns, 'image');
+  bomb.classList.add('bomb-action-icon'); bomb.setAttribute('href', './assets/bomb-unlight.png');
+  bomb.setAttribute('x', '-19.5'); bomb.setAttribute('y', '-19.5'); bomb.setAttribute('width', '39'); bomb.setAttribute('height', '39');
+  moving.setAttribute('transform', `translate(${end.x} ${end.y})`);
+  moving.append(bomb); boardPanel.append(moving);
+  // Sample the same quadratic curve into Web Animation keyframes. This is
+  // more reliable in Firefox than dynamically inserted SVG animateMotion and
+  // preserves the image's upright orientation throughout the flight.
+  const flightFrames: Keyframe[] = Array.from({ length: 25 }, (_, index) => {
+    const t = index / 24; const inverse = 1 - t;
+    const x = inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x;
+    const y = inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y;
+    return { translate: `${x - end.x}px ${y - end.y}px`, offset: t };
+  });
+  moving.animate(flightFrames, { duration: 900, easing: 'linear', fill: 'both' });
 }
 
 function selectedServerUnit(): ServerUnitState | undefined {
@@ -1273,6 +1633,17 @@ function confirmServerPendingAction(): void {
   sendServerAction(action);
 }
 
+function stageServerDeployment(troopId: string, coordinate: Coordinate, action?: ServerLegalAction): void {
+  if (!serverMatch || !localMatchPlayer || serverMatch.winner || serverMatch.activePlayer !== localMatchPlayer) return;
+  serverSelectedTroopId = troopId;
+  serverSelectedAction = 'deploy';
+  serverPendingAction = action ? { ...action } : { type: 'deploy', troopId, coordinate };
+  serverPushTargetChoices = [];
+  serverActionError = undefined;
+  sendServerSelection(troopId, { type: 'deploy', coordinate });
+  renderServerMatchState(serverMatch);
+}
+
 function performServerActionAt(coordinate: Coordinate): void {
   if (!serverMatch || serverMatch.winner || !localMatchPlayer || !serverSelectedTroopId || !serverSelectedAction || (serverMatch.pendingResolution?.owner ?? serverMatch.activePlayer) !== localMatchPlayer) return;
   if (serverSelectedAction === 'self-defense') return;
@@ -1286,8 +1657,7 @@ function performServerActionAt(coordinate: Coordinate): void {
   const action = candidates[0];
   if (!action) return;
   if (action.type === 'deploy') {
-    serverPendingAction = undefined;
-    sendServerAction(action);
+    stageServerDeployment(action.troopId, coordinate, action);
     return;
   }
   serverPendingAction = action.type === 'upgrade'
@@ -1295,7 +1665,10 @@ function performServerActionAt(coordinate: Coordinate): void {
     : { ...action };
   serverPushTargetChoices = [];
   sendServerSelection(serverSelectedTroopId, { type: serverSelectedAction, coordinate });
-  renderServerMatchState(serverMatch);
+  // Movement previews are rendered once from the server's target-selection
+  // echo. Rendering optimistically here would build the same animated group a
+  // second time a few milliseconds later and visibly restart the motion.
+  if (action.type !== 'move' && action.type !== 'fly' && action.type !== 'push' && action.type !== 'bomb') renderServerMatchState(serverMatch);
 }
 
 function clearServerPreviewPath(): void {
@@ -1336,10 +1709,9 @@ function previewServerPath(coordinate: Coordinate): void {
 function showServerHoverDetailsForCoordinate(coordinate: Coordinate): void {
   if (!serverMatch) return;
   const bomb = serverMatch.bombs?.find(item => item.coordinate === coordinate);
-  const damagePreview = serverPendingDamagePreview();
-  const projectedDamageTarget = damagePreview?.replacesBash && damagePreview.coordinate === coordinate
-    ? damagePreview.target
-    : undefined;
+  const damagePreviews = serverPendingDamagePreviews();
+  const coordinateDamagePreviews = damagePreviews.filter(preview => preview.coordinate === coordinate);
+  const projectedDamageTarget = coordinateDamagePreviews.find(preview => preview.replacesBash)?.target;
   const bash = projectedDamageTarget ? undefined : serverMatch.bashes.find(item => item.target === coordinate && !serverBashIsDodged(item, serverMatch));
   const unitPreview = serverPendingUnitPreviews().find(unit => unit.coordinate === coordinate);
   const unitAtCoordinate = serverMatch.units.find(unit => unit.coordinate === coordinate)
@@ -1354,7 +1726,8 @@ function showServerHoverDetailsForCoordinate(coordinate: Coordinate): void {
   for (const unit of displayed.sort((left, right) => left.owner - right.owner)) {
     const troop = serverTroop(unit.troopId, unit.owner, unit); if (!troop) continue;
     const { card, copy } = createHoverCard(troop);
-    const isDamageTarget = damagePreview?.target.id === unit.id;
+    const damagePreview = coordinateDamagePreviews.find(preview => preview.target.id === unit.id);
+    const isDamageTarget = Boolean(damagePreview);
     if (bash) {
       const modifier = serverModifier(unit, bash.target, bash);
       const combat = document.createElement('div'); combat.classList.add('hover-detail-line'); combat.textContent = `Bash strength: ${unit.combat.health} + ${modifier} = ${unit.combat.health + modifier}`; copy.append(combat);
@@ -1388,7 +1761,7 @@ function showServerHoverDetailsForCoordinate(coordinate: Coordinate): void {
 }
 
 function renderServerActionTargets(): void {
-  for (const { cell } of cellsByCoordinate.values()) cell.classList.remove('action-target', 'push-target', 'deployment-target', 'region-target', 'server-pending-target', 'server-reachable');
+  for (const { cell } of cellsByCoordinate.values()) cell.classList.remove('action-target', 'push-target', 'deployment-target', 'region-target', 'server-pending-target', 'server-pending-deployment', 'server-reachable');
   if (!serverSelectedAction) return;
   for (const action of selectedServerLegalActions()) {
     if (action.type !== serverSelectedAction || !action.coordinate) continue;
@@ -1399,7 +1772,11 @@ function renderServerActionTargets(): void {
     if (action.type === 'deploy') cell.classList.add('deployment-target');
     if (action.type === 'push') cell.classList.add('push-target');
   }
-  if (serverPendingAction?.coordinate) cellsByCoordinate.get(serverPendingAction.coordinate)?.cell.classList.add('server-pending-target', 'server-reachable');
+  if (serverPendingAction?.coordinate) {
+    const pendingCell = cellsByCoordinate.get(serverPendingAction.coordinate)?.cell;
+    pendingCell?.classList.add('server-pending-target', 'server-reachable');
+    if (serverPendingAction.type === 'deploy') pendingCell?.classList.add('server-pending-deployment');
+  }
   if (serverPendingAction?.type === 'push' && serverPendingAction.destination) {
     cellsByCoordinate.get(serverPendingAction.destination)?.cell.classList.add('server-pending-target', 'server-reachable');
   }
@@ -1408,6 +1785,12 @@ function renderServerActionTargets(): void {
     for (const coordinate of straightLine(unit.coordinate, serverPendingAction.coordinate, hexDistance(unit.coordinate, serverPendingAction.coordinate)) ?? []) {
       cellsByCoordinate.get(coordinate)?.cell.classList.add('server-pending-target', 'server-reachable');
     }
+  }
+}
+
+function raiseActionTargetCells(): void {
+  for (const { cell } of cellsByCoordinate.values()) {
+    if (cell.classList.contains('action-target') || cell.classList.contains('server-pending-target')) boardPanel.append(cell);
   }
 }
 
@@ -1427,6 +1810,7 @@ const serverActionLabels: Record<GameActionType, string> = {
   pass: 'Pass turn',
   'resolve-move': '🥾 End move',
   'resolve-death-attack': '💀 Ranged attack',
+  'resolve-instant-ranged': '🏹❗ Instant attack',
   'resolve-revive': '👼 Revive',
   'resolve-pass': 'Decline end move'
 };
@@ -1477,7 +1861,9 @@ function renderServerActionBar(match: ServerMatchState, local: Player): void {
   else if (serverActionError) message.textContent = serverActionError;
   else if (match.pendingResolution?.owner === local) message.textContent = match.pendingResolution.kind === 'optional-move'
     ? 'End: move this hero 1 hex, or decline to finish your turn.'
-    : match.pendingResolution.kind === 'death-attack' ? 'Death burst: choose an enemy target.' : 'Revive: choose one of your defeated troops.';
+    : match.pendingResolution.kind === 'death-attack' ? 'Death burst: choose an enemy target.'
+      : match.pendingResolution.kind === 'instant-ranged' ? `Choose a hex for the instant ranged effect${match.pendingResolution.remaining > 1 ? ` (${match.pendingResolution.remaining} remaining)` : ''}.`
+        : 'Revive: choose one of your defeated troops.';
   else message.textContent = match.activePlayer === local ? 'Your turn.' : `Opponent's turn — Player ${match.activePlayer === 1 ? '1 / Red' : '2 / Blue'}.`;
   actionBarPanel.append(message);
   if (match.sandbox && match.activePlayer === local && !match.winner && !match.pendingResolution) {
@@ -1497,8 +1883,8 @@ function renderServerActionBar(match: ServerMatchState, local: Player): void {
     }
     const skip = legalActions.find(action => action.type === 'resolve-pass');
     if (skip) { const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Skip'; button.addEventListener('click', () => sendServerAction(skip)); actionBarPanel.append(button); }
-  } else if (match.pendingResolution?.kind === 'death-attack') {
-    const button = document.createElement('button'); button.type = 'button'; button.textContent = '💀 Choose ranged target'; button.classList.add('active-action'); actionBarPanel.append(button);
+  } else if (match.pendingResolution?.kind === 'death-attack' || match.pendingResolution?.kind === 'instant-ranged') {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = match.pendingResolution.kind === 'death-attack' ? '💀 Choose ranged target' : '🏹❗ Choose target hex'; button.classList.add('active-action'); actionBarPanel.append(button);
     const skip = legalActions.find(action => action.type === 'resolve-pass');
     if (skip) { const skipButton = document.createElement('button'); skipButton.type = 'button'; skipButton.textContent = 'Skip'; skipButton.addEventListener('click', () => sendServerAction(skip)); actionBarPanel.append(skipButton); }
   } else if (!unit) {
@@ -1513,7 +1899,7 @@ function renderServerActionBar(match: ServerMatchState, local: Player): void {
           : 'This card has no legal deployment hex right now.';
   } else {
     const availableTypes = new Set(legalActions.map(action => action.type));
-    const orderedTypes: GameActionType[] = ['resolve-move', 'resolve-death-attack', 'resolve-pass', 'move', 'fly', 'attack', 'cannon', 'bomb', 'push', 'defense', 'self-defense', 'magic', 'mending', 'upgrade'];
+    const orderedTypes: GameActionType[] = ['resolve-move', 'resolve-death-attack', 'resolve-instant-ranged', 'resolve-pass', 'move', 'fly', 'attack', 'cannon', 'bomb', 'push', 'defense', 'self-defense', 'magic', 'mending', 'upgrade'];
     for (const type of orderedTypes.filter(candidate => availableTypes.has(candidate))) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = serverActionLabel(type); button.classList.toggle('active-action', serverSelectedAction === type);
       button.addEventListener('click', () => {
@@ -1555,7 +1941,7 @@ function renderServerActionBar(match: ServerMatchState, local: Player): void {
         serverPendingAction = { ...choice };
         serverPushTargetChoices = [];
         renderServerActionBar(match, local);
-        renderServerActionTargets();
+        renderServerMatchState(match);
       });
       actionBarPanel.append(button);
     }
@@ -1740,63 +2126,162 @@ function renderDeckBuilder(): void {
 const ns = 'http://www.w3.org/2000/svg';
 const size = 42;
 const hexGap = 1.5;
+const horizontalScale = 1.4;
 const center: Point = { x: 400, y: 310 };
 
 function axialToPixel(x: number, y: number): Point {
+  const verticalX = Math.sqrt(3) * size * (x - y / 2);
+  const verticalY = 1.5 * size * y;
   return {
-    x: center.x + Math.sqrt(3) * size * (x - y / 2),
-    y: center.y + 1.5 * size * y
+    x: center.x + verticalY * horizontalScale,
+    y: center.y - verticalX
   };
 }
 
 function hexPoints(cx: number, cy: number): string {
   return Array.from({ length: 6 }, (_, index) => {
-    const angle = (60 * index - 30) * Math.PI / 180;
-    return `${cx + (size - hexGap) * Math.cos(angle)},${cy + (size - hexGap) * Math.sin(angle)}`;
+    const angle = 60 * index * Math.PI / 180;
+    return `${cx + (size - hexGap) * horizontalScale * Math.cos(angle)},${cy + (size - hexGap) * Math.sin(angle)}`;
   }).join(' ');
 }
 
+function controlledBoardHexArtwork(regionId: RegionId | undefined, controller?: Player): string | undefined {
+  if (controller === 1) return regionId === 'p1-start' || regionId === 'p2-start' || regionId === 'front' ? 'hex_dark_red.png' : 'hex_light_red.png';
+  if (controller === 2) return regionId === 'p1-start' || regionId === 'p2-start' || regionId === 'front' ? 'hex_dark_blue.png' : 'hex_light_blue.png';
+  return regionId === 'p1-start' ? 'hex_dark_red.png'
+    : regionId === 'p1-middle' || regionId === 'p1-side' ? 'hex_light_red.png'
+      : regionId === 'p2-start' ? 'hex_dark_blue.png'
+        : regionId === 'p2-middle' || regionId === 'p2-side' ? 'hex_light_blue.png'
+          : regionId === 'front' ? 'hex_grey.png'
+            : undefined;
+}
+
+function boardHexArtwork(regionId: RegionId | undefined, position: Point): SVGImageElement | undefined {
+  const filename = controlledBoardHexArtwork(regionId);
+  if (!filename) return undefined;
+  const image = document.createElementNS(ns, 'image');
+  image.classList.add('board-hex-artwork');
+  image.setAttribute('href', `./assets/${filename}`);
+  // The visible frame occupies x=75..1185 and y=149..1087 of the 1254px
+  // source canvas. Map those alpha bounds exactly onto this SVG hex.
+  image.setAttribute('x', String(position.x - 64.37));
+  image.setAttribute('y', String(position.y - 46.23));
+  image.setAttribute('width', '128.16');
+  image.setAttribute('height', '93.82');
+  image.setAttribute('preserveAspectRatio', 'none');
+  image.setAttribute('aria-hidden', 'true');
+  return image;
+}
+
 /** Place a server-rendered description using the shared board orientation. */
-function writeServerBoardDescription(marker: SVGTextElement, troop: Troop, position: Point, includeSelfBlock = false, revealMoveOne = false): void {
+function contextualBoardDescriptionEntries(troop: Troop, includeSelfBlock = false, revealMoveOne = false, ignitionDamage?: number): ReturnType<typeof boardDescriptionEntries> {
+  const entries = boardDescriptionEntries(troop, includeSelfBlock, revealMoveOne);
+  return ignitionDamage
+    ? entries.map(line => line.action === 'magic' ? { ...line, text: `${ignitionDamage} 💣` } : line)
+    : entries;
+}
+
+const boardEmojiPattern = /(❤️|♥|🥾|🪽|🏹|🛡️|🔥|🧨|💣|🫸|🔮|⚔️|👑|🩸|💀|👼|❗)/gu;
+const boardDescriptionLineHeight = 9;
+
+function boardDescriptionLineY(position: Point, lineCount: number, index: number): number {
+  // Health belongs to the upper area of the full board hex. Only the
+  // remaining ability/effect rows are placed in the lower info hex.
+  if (index === 0) return position.y - 19;
+  const infoLineCount = Math.max(1, lineCount - 1);
+  return position.y + 29 - (infoLineCount - index) * boardDescriptionLineHeight;
+}
+
+function appendBoardDescriptionText(parent: SVGTSpanElement, text: string): void {
+  for (const token of text.split(boardEmojiPattern).filter(Boolean)) {
+    const span = document.createElementNS(ns, 'tspan');
+    span.textContent = token;
+    if (token.match(boardEmojiPattern)) {
+      span.classList.add('board-info-emoji');
+    } else span.classList.add('board-info-glyph');
+    parent.append(span);
+  }
+}
+
+function appendBoardInfoFrame(cell: SVGGElement, troop: Troop, position: Point): void {
+  const frame = document.createElementNS(ns, 'polygon');
+  frame.dataset.serverRender = 'info-frame';
+  frame.classList.add('board-info-frame', troop.owner === 1 ? 'player-one-info-frame' : 'player-two-info-frame');
+  const radius = size - hexGap;
+  const sqrt3Quarter = Math.sqrt(3) / 4;
+  const infoCentre: Point = {
+    x: position.x,
+    y: position.y + radius * sqrt3Quarter
+  };
+  const relativePoints: Point[] = [
+    { x: 3 / 4, y: 0 },
+    { x: 1 / 2, y: -sqrt3Quarter },
+    { x: -1 / 2, y: -sqrt3Quarter },
+    { x: -3 / 4, y: 0 },
+    { x: -1 / 2, y: sqrt3Quarter },
+    { x: 1 / 2, y: sqrt3Quarter }
+  ];
+  frame.setAttribute('points', relativePoints.map(point =>
+    `${infoCentre.x + point.x * radius * horizontalScale},${infoCentre.y + point.y * radius}`
+  ).join(' '));
+  frame.setAttribute('clip-path', `url(#${cell.dataset.clipId})`);
+  keepServerOverlayUpright(frame, position);
+  cell.append(frame);
+}
+
+function writeServerBoardDescription(marker: SVGTextElement, troop: Troop, position: Point, includeSelfBlock = false, revealMoveOne = false, ignitionDamage?: number): void {
   marker.replaceChildren();
-  const lines = boardDescriptionEntries(troop, includeSelfBlock, revealMoveOne);
-  const firstLineY = position.y - (lines.length > 3 ? 27 : 22);
+  const lines = contextualBoardDescriptionEntries(troop, includeSelfBlock, revealMoveOne, ignitionDamage);
   for (const [index, line] of lines.entries()) {
     const row = document.createElementNS(ns, 'tspan');
     row.setAttribute('x', String(position.x));
-    row.setAttribute('y', String(firstLineY + index * 11));
-    if (index === 0 && line.text.includes('♥')) row.classList.add('board-health');
+    row.setAttribute('y', String(boardDescriptionLineY(position, lines.length, index)));
+    if (index === 0 && line.text.includes('♥')) {
+      row.classList.add('board-health');
+      const ownerClass = troop.owner === 1 ? 'player-one-health' : 'player-two-health';
+      const match = line.text.match(/(♥|❤️)\s*(\d+)/u);
+      if (match) {
+        const heart = document.createElementNS(ns, 'tspan');
+        heart.classList.add('board-health-heart', ownerClass);
+        heart.textContent = match[1];
+        const value = document.createElementNS(ns, 'tspan');
+        value.classList.add('board-health-value', ownerClass);
+        value.textContent = ` ${match[2]}`;
+        row.append(heart, value);
+        marker.append(row);
+        continue;
+      }
+    }
     if (line.upgraded) row.classList.add('upgraded-effect');
     const values = line.text.match(/^(\d+)(.*?)(\d+)$/u);
     if (values && (line.staticLeft || line.staticRight)) {
-      const left = document.createElementNS(ns, 'tspan'); left.textContent = values[1];
-      const middle = document.createElementNS(ns, 'tspan'); middle.textContent = values[2];
-      const right = document.createElementNS(ns, 'tspan'); right.textContent = values[3];
+      const left = document.createElementNS(ns, 'tspan'); appendBoardDescriptionText(left, values[1]);
+      const middle = document.createElementNS(ns, 'tspan'); appendBoardDescriptionText(middle, values[2]);
+      const right = document.createElementNS(ns, 'tspan'); appendBoardDescriptionText(right, values[3]);
       if (line.staticLeft) left.classList.add('static-effect');
       if (line.staticRight) right.classList.add('static-effect');
       row.append(left, middle, right);
-    } else row.textContent = line.text;
+    } else appendBoardDescriptionText(row, line.text);
     marker.append(row);
   }
 }
 
-function appendServerActionDescriptionHighlight(cell: SVGGElement, troop: Troop, position: Point, action?: GameActionType, highlightLife = false, includeSelfBlock = false, negativeSelfBlock = false): void {
+function appendServerActionDescriptionHighlight(cell: SVGGElement, troop: Troop, position: Point, action?: GameActionType, highlightLife = false, includeSelfBlock = false, negativeSelfBlock = false, ignitionDamage?: number): void {
   const relevantAction = action === 'self-defense' && includeSelfBlock ? 'self-defense' : action === 'self-defense' ? 'defense' : action;
   // Life has no action tag. Do not let an absent selection accidentally
   // match it; it is highlighted only for a troop just deployed this turn.
   if (!highlightLife && !relevantAction) return;
-  const entries = boardDescriptionEntries(troop, includeSelfBlock, relevantAction === 'move');
+  const entries = contextualBoardDescriptionEntries(troop, includeSelfBlock, relevantAction === 'move', ignitionDamage);
   const index = highlightLife ? 0 : entries.findIndex(line => line.action === relevantAction);
   if (index < 0) return;
   const line = entries[index];
-  const firstLineY = position.y - (entries.length > 3 ? 27 : 22);
   const rect = document.createElementNS(ns, 'rect');
   rect.dataset.serverRender = 'description-highlight';
   rect.classList.add('action-description-highlight', troop.owner === 1 ? 'player-one-highlight' : 'player-two-highlight');
   if (negativeSelfBlock) rect.classList.add('self-block-pending-highlight');
   const width = Math.min(72, Math.max(18, line.text.length * 7.4 + 8));
   rect.setAttribute('x', String(position.x - width / 2));
-  rect.setAttribute('y', String(firstLineY + index * 11 - 9));
+  rect.setAttribute('y', String(boardDescriptionLineY(position, entries.length, index) - 9));
   rect.setAttribute('width', String(width)); rect.setAttribute('height', '11'); rect.setAttribute('rx', '2');
   rect.setAttribute('clip-path', `url(#${cell.dataset.clipId})`);
   keepServerOverlayUpright(rect, position);
@@ -1976,7 +2461,8 @@ for (let y = -4; y <= 4; y += 1) {
     label.setAttribute('y', String(position.y + 4));
     label.textContent = `${x}, ${y}`;
 
-    cell.append(clip, hex, label);
+    const artwork = boardHexArtwork(regionId, position);
+    cell.append(clip, ...(artwork ? [artwork] : []), hex, label);
     cell.addEventListener('pointerenter', () => {
       if (serverMatch) { setServerHoverPreview(coordinate, true); showServerHoverDetailsForCoordinate(coordinate); previewServerPath(coordinate); }
     });
@@ -2280,9 +2766,22 @@ troopInspectorPanel.addEventListener('click', event => {
 });
 
 document.addEventListener('keydown', event => {
-  if (event.code !== 'Space' || event.repeat || !serverPendingAction) return;
+  if (event.code !== 'Space' || event.repeat) return;
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+  if (serverPendingAction) {
+    event.preventDefault();
+    confirmServerPendingAction();
+    return;
+  }
+  // Space also means "continue" while an optional triggered resolution is
+  // waiting. Use the authoritative legal action so mandatory effects (for
+  // example the Last Bell's two attacks) cannot accidentally be skipped.
+  const local = localMatchPlayer;
+  const skip = local && serverMatch?.pendingResolution?.owner === local
+    ? serverMatch.legalActions?.[local]?.find(action => action.type === 'resolve-pass')
+    : undefined;
+  if (!skip) return;
   event.preventDefault();
-  confirmServerPendingAction();
+  sendServerAction(skip);
 });

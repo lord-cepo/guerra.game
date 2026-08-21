@@ -20,6 +20,12 @@ test('clicking a database card adds its catalogue ID to the first visible deck s
   assert.deepEqual(selectedDeckCards(slots, 8), ['queen-bee']);
 });
 
+test('Control X is shown in compact and hover card rules', () => {
+  const troop = { ...createTroopView('ember-salamander', 1), control: 2 };
+  assert.ok(boardDescriptionEntries(troop).some(line => line.text === 'Control 2'));
+  assert.ok(cardRuleDetails(troop).includes('Control 2: this unit contributes 2 additional control to its current region.'));
+});
+
 test('adding cards rejects duplicates, unknown cards, and a second hero', () => {
   const initial = createDeckSlots(['queen-bee', 'ember-salamander']);
   assert.equal(addDeckCard(initial, 'queen-bee', 8, catalogue), initial);
@@ -161,7 +167,7 @@ test('every catalogue card exposes complete readable hover rules', () => {
     const rules = cardRuleDetails(troop);
     assert.doesNotMatch(rules[0], /^Deploy/);
     assert.ok(rules.length >= seed.actions.length + 1, `${seed.name} should describe every action`);
-    if (!seed.actions.some(action => action.type === 'move' || action.type === 'fly')) {
+    if (!seed.actions.some(action => action.kind === 'move' || action.kind === 'fly')) {
       assert.ok(rules.includes('Movement: this unit cannot move.'), `${seed.name} should explain that it is immobile`);
     }
     if (seed.ruleDescription) assert.ok(rules.includes(seed.ruleDescription), `${seed.name} should explain its passive`);
