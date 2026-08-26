@@ -26,6 +26,16 @@ test('Control X is shown in compact and hover card rules', () => {
   assert.ok(cardRuleDetails(troop).includes('Control 2: this unit contributes 2 additional control to its current region.'));
 });
 
+test('board hex information always uses three rows and marks overflow on the third', () => {
+  const short = boardDescriptionEntries(createTroopView('ember-salamander', 1));
+  assert.equal(short.length, 3);
+
+  const overflowing = boardDescriptionEntries(createTroopView('wandering-monarch', 1));
+  assert.equal(overflowing.length, 3);
+  assert.match(overflowing[2].text, / \.\.\.$/u);
+  assert.notEqual(overflowing[2].text, '...');
+});
+
 test('adding cards rejects duplicates, unknown cards, and a second hero', () => {
   const initial = createDeckSlots(['queen-bee', 'ember-salamander']);
   assert.equal(addDeckCard(initial, 'queen-bee', 8, catalogue), initial);
@@ -190,6 +200,6 @@ test('Sahel Porcupine exposes accumulated event bonuses as magenta board and hov
   });
   assert.deepEqual(permanentUpgradeBonus(porcupine, 'attack'), { left: 2, right: 2 });
   const rangedLine = boardDescriptionEntries(porcupine).find(line => line.action === 'attack');
-  assert.deepEqual(rangedLine, { text: '3 🏹 3', action: 'attack', upgraded: false, staticLeft: true, staticRight: true });
+  assert.deepEqual(rangedLine, { text: '3 🏹 3 ...', action: 'attack', upgraded: false, staticLeft: true, staticRight: true });
   assert.ok(cardRuleDetails(porcupine).some(rule => rule.startsWith('3🏹3 (ranged attack):')));
 });

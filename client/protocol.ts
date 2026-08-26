@@ -11,6 +11,7 @@ export interface ServerLegalAction {
   coordinate?: Coordinate;
   destination?: Coordinate;
   targetUnitId?: string;
+  targetBomb?: boolean;
   targetTroopId?: string;
   ability?: UpgradableAbility;
 }
@@ -25,10 +26,14 @@ export interface ServerUnitState {
   rangedDamageBonus?: number;
   rangedRangeBonus?: number;
   bashModifierBonus?: number;
+  magicModifierBonus?: number;
+  stunnedTurns?: number;
   upgrades?: Array<{ ability?: UpgradableAbility; left?: number; right?: number; sourceUnitId?: string }>;
+  shields?: Array<{ value: number; sourceUnitId?: string }>;
   combat: {
     health: number;
     modifier: number;
+    magicModifier: number;
     modifiers: Array<{ label: string; value: number }>;
     total: number;
     controller?: Player;
@@ -40,9 +45,11 @@ export interface ServerEffectState {
   sourceTroopId: string;
   sourceUnitId?: string;
   targetUnitId?: string;
-  kind: 'attack' | 'cannon' | 'bomb' | 'magic' | 'defense';
+  kind: 'attack' | 'cannon' | 'gore' | 'bomb' | 'magic' | 'stun';
   target: Coordinate;
   value: number;
+  pierce?: boolean;
+  origin?: Coordinate;
 }
 
 export interface ServerBashState {
@@ -59,8 +66,25 @@ export interface ServerControlState {
 
 export interface ServerGameEvent {
   player: Player;
-  action: { type: GameActionType; troopId: string; coordinate?: Coordinate };
+  action: { type: GameActionType; troopId: string; coordinate?: Coordinate; destination?: Coordinate; targetUnitId?: string; targetBomb?: boolean };
   origin?: Coordinate;
+}
+
+export interface ServerTriggerEvent {
+  trigger: string;
+  player: Player;
+  hex?: Coordinate;
+  troopIds: string[];
+  actingTroopId?: string;
+  attackerId?: string;
+  defenderId?: string;
+  firstStrike?: {
+    unitId: string;
+    targetId: string;
+    firstDamage: number;
+    retaliationDamage: number;
+    targetSurvived: boolean;
+  };
 }
 
 export interface ServerTargetSelection {
@@ -100,4 +124,5 @@ export interface ServerMatchState {
   legalActions?: Partial<Record<Player, ServerLegalAction[]>>;
   control: Record<string, ServerControlState>;
   events?: ServerGameEvent[];
+  triggerEvents?: ServerTriggerEvent[];
 }

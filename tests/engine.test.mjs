@@ -8,6 +8,9 @@ const cards = new Map(catalogueCards);
 // Several generic engine scenarios need Queen Bee's ranged profile on a
 // non-hero fixture so deployment prerequisites can be tested independently.
 cards.set('queen-bee', { ...cards.get('queen-bee'), role: 'troop', baseHealth: 3 });
+cards.set('pierce-test', { id: 'pierce-test', name: 'Pierce Test', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: [{ kind: 'ranged', amount: 1, range: 3, type: ['pierce'] }] });
+cards.set('magic-defense-test', { id: 'magic-defense-test', name: 'Magic Defense Test', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: [{ kind: 'defense', amount: 2, range: 2, type: ['magic'] }] });
+cards.set('self-magic-defense-test', { id: 'self-magic-defense-test', name: 'Self Magic Defense Test', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: [], selfMagicDefense: 2 });
 
 test('card definitions distinguish continuous conditions from action-producing triggers', () => {
   assert.deepEqual(cards.get('canyon-ibex').continuousEffects, [
@@ -23,9 +26,9 @@ test('card definitions distinguish continuous conditions from action-producing t
 test('the expansion cards expose their revised health, actions, and compact passives', () => {
   assert.equal(cards.get('stag-guardian').baseHealth, 4);
   assert.deepEqual(cards.get('raven-prince').actions, [{ kind: 'fly', range: 3 }]);
-  assert.equal(cards.get('raven-prince').passiveDescription, 'End: 1🏹❗1');
+  assert.equal(cards.get('raven-prince').passiveDescription, 'End: 1🚫1');
   assert.equal(cards.get('temple-last-bell').baseHealth, 1);
-  assert.equal(cards.get('temple-last-bell').passiveDescription, '💀: 2×3🏹❗3');
+  assert.equal(cards.get('temple-last-bell').passiveDescription, '💀: 2×3F🏹3');
   assert.equal(cards.get('temple-marches').baseHealth, 1);
   assert.deepEqual(cards.get('tortoise-emperor').actions, []);
   assert.equal(cards.get('tortoise-emperor').passiveDescription, '🥾0\nEnd: adj +1🛡️');
@@ -33,9 +36,7 @@ test('the expansion cards expose their revised health, actions, and compact pass
 
 test('active and triggered card actions share the normalized action dictionary', () => {
   assert.deepEqual(cards.get('queen-bee').actions[1], { kind: 'ranged', amount: 3, range: 4 });
-  assert.deepEqual(cards.get('raven-prince').triggers[0].action, {
-    kind: 'ranged', amount: 1, range: 1, type: ['instant', 'optional']
-  });
+  assert.deepEqual(cards.get('raven-prince').triggers[0].action, { kind: 'stun', amount: 1, range: 1 });
   for (const troop of troopSeeds) {
     for (const action of [...troop.actions, ...(troop.triggers ?? []).map(trigger => trigger.action)]) {
       assert.deepEqual(Object.keys(action).sort(), Object.keys(action).filter(key => ['kind', 'amount', 'range', 'type'].includes(key)).sort(), `${troop.id} uses only normalized action keys`);
@@ -46,7 +47,7 @@ test('active and triggered card actions share the normalized action dictionary',
   }
 });
 
-test('Tortoise Emperor places tile-bound defense on each adjacent ally at End', () => {
+test('Tortoise Emperor places troop-owned shields on each adjacent ally at End', () => {
   const state = { activePlayer: 1, units: [
     { id: '1:tortoise-emperor', troopId: 'tortoise-emperor', owner: 1, coordinate: '1,2', permanentDamage: 0 },
     { id: '1:steppe-lynx', troopId: 'steppe-lynx', owner: 1, coordinate: '1,1', permanentDamage: 0 },
@@ -54,7 +55,7 @@ test('Tortoise Emperor places tile-bound defense on each adjacent ally at End', 
     { id: '2:coastal-heron', troopId: 'coastal-heron', owner: 2, coordinate: '2,3', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const ended = applyGameAction(state, 1, { type: 'pass' }, cards);
-  assert.deepEqual(ended.effects.filter(effect => effect.kind === 'defense').map(effect => [effect.target, effect.value]).sort(), [['1,1', 1], ['2,2', 1]]);
+  assert.deepEqual(ended.units.filter(unit => unit.shields).map(unit => [unit.coordinate, unit.shields?.[0].value]).sort(), [['1,1', 1], ['2,2', 1]]);
 });
 
 test('Temple of Marches adds one to friendly Move range while deployed', () => {
@@ -89,17 +90,21 @@ test('Wandering Monarch End event pauses the turn for an optional one-hex move',
   assert.equal(declined.activePlayer, 2);
 });
 
-test('Raven Prince instant End attack is optional and can be skipped', () => {
+test('Raven Prince End stun requires an enemy target within one hex', () => {
   const state = { activePlayer: 1, units: [
-    { id: '1:raven-prince', troopId: 'raven-prince', owner: 1, coordinate: '1,2', permanentDamage: 0 }
+    { id: '1:raven-prince', troopId: 'raven-prince', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+    { id: '2:squirrel-king', troopId: 'squirrel-king', owner: 2, coordinate: '1,1', permanentDamage: 0, shields: [{ value: 1 }], magicModifierBonus: 1 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const pending = applyGameAction(state, 1, { type: 'pass' }, cards);
-  assert.equal(pending.pendingResolution?.kind, 'instant-ranged');
-  assert.equal(pending.pendingResolution?.optional, true);
-  assert.ok(availableActionsFor(pending, 1, 'raven-prince', cards).some(action => action.type === 'resolve-pass'));
-  const skipped = applyGameAction(pending, 1, { type: 'resolve-pass', troopId: 'raven-prince' }, cards);
-  assert.equal(skipped.pendingResolution, undefined);
-  assert.equal(skipped.activePlayer, 2);
+  assert.equal(pending.pendingResolution?.kind, 'stun');
+  const choice = availableActionsFor(pending, 1, 'raven-prince', cards).find(action => action.type === 'resolve-stun');
+  assert.ok(choice);
+  const stunned = applyGameAction(pending, 1, choice, cards);
+  const target = stunned.units.find(unit => unit.troopId === 'squirrel-king');
+  assert.equal(target?.stunnedTurns, 1);
+  assert.equal(target?.shields, undefined);
+  assert.equal(target?.magicModifierBonus, undefined);
+  assert.equal(stunned.activePlayer, 2);
 });
 
 test('dashboard stack instantiates a Squirrel King trigger as a nested action', () => {
@@ -140,7 +145,7 @@ test('simultaneous triggers use the active player deck order before LIFO resolut
   ], effects: [], bashes: [], lastActingTroopId: {}, dashboard: [], resolutionStack: [], nextDashboardId: 1 };
   const pending = applyGameAction(state, 1, { type: 'pass' }, cards);
   assert.equal(pending.pendingResolution.sourceTroopId, 'raven-prince');
-  assert.equal(pending.dashboard.find(row => row.id === pending.currentEventId).causedByTriggerId, 'raven-prince:dusk-strike');
+  assert.equal(pending.dashboard.find(row => row.id === pending.currentEventId).causedByTriggerId, 'raven-prince:dusk-stun');
   assert.equal(pending.pendingResolutionQueue[0].sourceTroopId, 'wandering-monarch');
 });
 
@@ -150,17 +155,17 @@ test('block and self block remain available without an existing threat', () => {
     { id: '2:marsh-badger', troopId: 'marsh-badger', owner: 2, coordinate: '2,2', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const actions = availableActionsFor(state, 1, 'wandering-monarch', cards);
-  assert.ok(actions.some(action => action.type === 'defense' && action.coordinate === '2,2'), 'an enemy-occupied reachable hex can be shielded');
-  assert.ok(actions.some(action => action.type === 'defense' && action.coordinate === '0,2'), 'an empty reachable hex can be shielded');
+  assert.ok(!actions.some(action => action.type === 'defense' && action.coordinate === '2,2'), 'an enemy troop cannot receive a shield');
+  assert.ok(!actions.some(action => action.type === 'defense' && action.coordinate === '0,2'), 'an empty hex cannot receive a shield');
   assert.ok(actions.some(action => action.type === 'self-defense'), 'self block is available before an attack exists');
 });
 
 test('Wandering Monarch carries its owner’s destination-hex shield into its End bash', () => {
-  const state = { activePlayer: 1, units: [
-    { id: '1:wandering-monarch', troopId: 'wandering-monarch', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+  const state = { activePlayer: 1, phase: 'action', units: [
+    { id: '1:wandering-monarch', troopId: 'wandering-monarch', owner: 1, coordinate: '1,2', permanentDamage: 0, shields: [{ value: 2, sourceUnitId: '1:iron-armadillo' }] },
     { id: '2:marsh-badger', troopId: 'marsh-badger', owner: 2, coordinate: '2,2', permanentDamage: 1 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
-  const shielded = applyGameAction(state, 1, { type: 'defense', troopId: 'wandering-monarch', coordinate: '2,2' }, cards);
+  const shielded = { ...state, phase: 'end', pendingResolution: { owner: 1, turnPlayer: 1, sourceUnitId: '1:wandering-monarch', sourceTroopId: 'wandering-monarch', kind: 'optional-move', distance: 1 } };
   assert.equal(shielded.pendingResolution?.kind, 'optional-move');
   const bashed = applyGameAction(shielded, 1, { type: 'resolve-move', troopId: 'wandering-monarch', coordinate: '2,2' }, cards);
   assert.equal(combatSummary(bashed, '1:wandering-monarch', cards, '2,2').modifiers.some(entry => entry.label === 'Shield' && entry.value === 2), true);
@@ -168,21 +173,21 @@ test('Wandering Monarch carries its owner’s destination-hex shield into its En
   const resolved = applyGameAction(bashed, 2, { type: 'pass' }, cards);
   assert.ok(resolved.units.some(unit => unit.id === '1:wandering-monarch'), 'the shield changes the bash outcome and saves the Monarch');
   assert.equal(resolved.units.some(unit => unit.id === '2:marsh-badger'), false);
-  assert.equal(resolved.effects.some(effect => effect.kind === 'defense'), false, 'the shield expires when the opponent finishes responding');
+  assert.equal(resolved.units.find(unit => unit.id === '1:wandering-monarch')?.shields, undefined, 'the bash consumes the troop shields');
 });
 
-test('Wandering Monarch self block stays on its origin when its End move starts a bash', () => {
-  const state = { activePlayer: 1, units: [
-    { id: '1:wandering-monarch', troopId: 'wandering-monarch', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+test('Wandering Monarch self block follows it when its End move starts a bash', () => {
+  const state = { activePlayer: 1, phase: 'action', units: [
+    { id: '1:wandering-monarch', troopId: 'wandering-monarch', owner: 1, coordinate: '1,2', permanentDamage: 0, shields: [{ value: 1, sourceUnitId: '1:wandering-monarch' }] },
     { id: '2:marsh-badger', troopId: 'marsh-badger', owner: 2, coordinate: '2,2', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
-  const shielded = applyGameAction(state, 1, { type: 'self-defense', troopId: 'wandering-monarch' }, cards);
-  assert.deepEqual(shielded.effects.filter(effect => effect.kind === 'defense').map(effect => effect.target), ['1,2']);
+  const shielded = { ...state, phase: 'end', pendingResolution: { owner: 1, turnPlayer: 1, sourceUnitId: '1:wandering-monarch', sourceTroopId: 'wandering-monarch', kind: 'optional-move', distance: 1 } };
+  assert.deepEqual(shielded.units.find(unit => unit.id === '1:wandering-monarch')?.shields?.map(shield => shield.value), [1]);
   assert.equal(shielded.pendingResolution?.kind, 'optional-move');
 
   const bashed = applyGameAction(shielded, 1, { type: 'resolve-move', troopId: 'wandering-monarch', coordinate: '2,2' }, cards);
-  assert.deepEqual(bashed.effects.filter(effect => effect.kind === 'defense').map(effect => effect.target), ['1,2'], 'the shield does not follow the Monarch');
-  assert.equal(combatSummary(bashed, '1:wandering-monarch', cards, '2,2').modifiers.some(entry => entry.label === 'Shield'), false, 'the origin shield gives no modifier in the destination bash');
+  assert.deepEqual(bashed.units.find(unit => unit.id === '1:wandering-monarch')?.shields?.map(shield => shield.value), [1], 'the shield follows the Monarch');
+  assert.equal(combatSummary(bashed, '1:wandering-monarch', cards, '2,2').modifiers.some(entry => entry.label === 'Shield'), true, 'the followed shield protects the destination bash');
 });
 
 test('a non-hero cannot be deployed before that player deploys a hero', () => {
@@ -418,6 +423,24 @@ test('magic does not cause permanent damage when it fails to kill', () => {
   assert.equal(hero.permanentDamage, 0);
 });
 
+test('magic modifier prevents a lethal magic attack and is consumed by that attack', () => {
+  const state = {
+    activePlayer: 1,
+    units: [
+      { troopId: 'ember-salamander', owner: 1, coordinate: '0,1', permanentDamage: 0 },
+      { troopId: 'squirrel-king', owner: 2, coordinate: '0,-1', permanentDamage: 1, magicModifierBonus: 1 }
+    ],
+    effects: [],
+    bashes: []
+  };
+  const cast = applyGameAction(state, 1, { type: 'magic', troopId: 'ember-salamander', coordinate: '0,-1' }, cards);
+  const resolved = applyGameAction(cast, 2, { type: 'magic', troopId: 'squirrel-king', coordinate: '-1,-1' }, cards);
+  const hero = resolved.units.find(unit => unit.troopId === 'squirrel-king');
+  assert.ok(hero);
+  assert.equal(hero.magicModifierBonus, undefined);
+  assert.equal(hero.permanentDamage, 1);
+});
+
 test('a troop that moves out of a magic target hex is not killed', () => {
   const state = {
     activePlayer: 1,
@@ -602,6 +625,41 @@ test('equal bash combat health removes both units', () => {
   assert.equal(resolved.units.length, 0);
 });
 
+test('First Strike damages the enemy before it can retaliate', () => {
+  const firstStrikeCards = new Map(cards);
+  firstStrikeCards.set('tiger-queen', { ...cards.get('tiger-queen'), firstStrike: true });
+  const state = { activePlayer: 1, units: [
+    { troopId: 'tiger-queen', owner: 1, coordinate: '1,1', permanentDamage: 0 },
+    { troopId: 'desert-fox', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+  ], effects: [], bashes: [] };
+  const bash = applyGameAction(state, 1, { type: 'move', troopId: 'tiger-queen', coordinate: '1,0' }, firstStrikeCards);
+  const resolved = applyGameAction(bash, 2, { type: 'pass' }, firstStrikeCards);
+
+  assert.ok(resolved.units.some(unit => unit.troopId === 'tiger-queen'));
+  assert.equal(resolved.units.some(unit => unit.troopId === 'desert-fox'), false);
+  assert.equal(resolved.units.find(unit => unit.troopId === 'tiger-queen')?.permanentDamage, 0);
+  assert.deepEqual(resolved.triggerEvents?.find(event => event.trigger === 'bashResolved')?.firstStrike, {
+    unitId: '1:tiger-queen', targetId: '2:desert-fox', firstDamage: 6, retaliationDamage: 0, targetSurvived: false
+  });
+});
+
+test('First Strike allows retaliation when the enemy survives the first hit', () => {
+  const firstStrikeCards = new Map(cards);
+  firstStrikeCards.set('steppe-lynx', { ...cards.get('steppe-lynx'), firstStrike: true });
+  const state = { activePlayer: 1, units: [
+    { troopId: 'steppe-lynx', owner: 1, coordinate: '1,1', permanentDamage: 0 },
+    { troopId: 'tiger-queen', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+  ], effects: [], bashes: [] };
+  const bash = applyGameAction(state, 1, { type: 'move', troopId: 'steppe-lynx', coordinate: '1,0' }, firstStrikeCards);
+  const resolved = applyGameAction(bash, 2, { type: 'pass' }, firstStrikeCards);
+
+  assert.equal(resolved.units.some(unit => unit.troopId === 'steppe-lynx'), false);
+  assert.equal(resolved.units.find(unit => unit.troopId === 'tiger-queen')?.permanentDamage, 1, 'physical gore damage is reduced by the target modifier');
+  assert.deepEqual(resolved.triggerEvents?.find(event => event.trigger === 'bashResolved')?.firstStrike, {
+    unitId: '1:steppe-lynx', targetId: '2:tiger-queen', firstDamage: 2, retaliationDamage: 3, targetSurvived: true
+  });
+});
+
 test('a complete front-line bash state has tied control and no combat modifiers', () => {
   const state = {
     activePlayer: 2,
@@ -758,13 +816,13 @@ test('a shield expires after it resolves the opposing physical attack', () => {
   assert.equal(resolved.effects.length, 0);
 });
 
-test('self block creates exactly 1 shield on the acting troop hex', () => {
+test('self block creates exactly 1 shield on the acting troop', () => {
   const state = { activePlayer: 2, units: [
     { troopId: 'queen-bee', owner: 1, coordinate: '2,0', permanentDamage: 0 },
     { troopId: 'river-otter', owner: 2, coordinate: '1,0', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const next = applyGameAction(state, 2, { type: 'self-defense', troopId: 'river-otter' }, cards);
-  assert.deepEqual(next.effects, [{ owner: 2, sourceTroopId: 'river-otter', sourceUnitId: '2:river-otter', kind: 'defense', target: '1,0', value: 1 }]);
+  assert.deepEqual(next.units.find(unit => unit.troopId === 'river-otter')?.shields, [{ value: 1, sourceUnitId: '2:river-otter' }]);
   assert.equal(combatBreakdown(next, 'river-otter', cards).modifier, 1);
 });
 
@@ -965,6 +1023,39 @@ test('push moves the selected troop along the legal straight line and records it
   }, cards), /Invalid push destination/);
 });
 
+test('pull moves the selected troop toward the acting troop', () => {
+  cards.set('pull-tester', {
+    id: 'pull-tester', name: 'Pull Tester', role: 'troop', baseHealth: 2,
+    deploymentRegions: ['starting'], actions: [{ kind: 'pull', amount: 1, range: 2 }]
+  });
+  const state = { activePlayer: 1, units: [
+    { troopId: 'pull-tester', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+    { troopId: 'coastal-heron', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const pulled = applyGameAction(state, 1, { type: 'pull', troopId: 'pull-tester', coordinate: '1,0', destination: '1,1', targetUnitId: '2:coastal-heron' }, cards);
+  assert.equal(pulled.units.find(unit => unit.troopId === 'coastal-heron')?.coordinate, '1,1');
+  assert.equal(pulled.events.at(-1)?.origin, '1,0');
+});
+
+test('stun clears both modifiers and skips the target troop for one turn', () => {
+  cards.set('stun-tester', {
+    id: 'stun-tester', name: 'Stun Tester', role: 'troop', baseHealth: 2,
+    deploymentRegions: ['starting'], actions: [{ kind: 'stun', amount: 1, range: 2 }]
+  });
+  const state = { activePlayer: 1, units: [
+    { troopId: 'stun-tester', owner: 1, coordinate: '0,1', permanentDamage: 0 },
+    { troopId: 'squirrel-king', owner: 2, coordinate: '0,-1', permanentDamage: 0, shields: [{ value: 2 }], magicModifierBonus: 1 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const stunned = applyGameAction(state, 1, { type: 'stun', troopId: 'stun-tester', coordinate: '0,-1' }, cards);
+  const target = stunned.units.find(unit => unit.troopId === 'squirrel-king');
+  assert.equal(target?.stunnedTurns, 1);
+  assert.equal(target?.shields, undefined);
+  assert.equal(target?.magicModifierBonus, undefined);
+  assert.equal(availableActionsFor(stunned, 2, 'squirrel-king', cards).length, 0);
+  const afterTurn = applyGameAction(stunned, 2, { type: 'pass' }, cards);
+  assert.equal(afterTurn.units.find(unit => unit.troopId === 'squirrel-king')?.stunnedTurns, undefined);
+});
+
 test('a push-created bash waits for a later defender response even when the defender owns the pusher', () => {
   const state = { activePlayer: 2, units: [
     { id: '2:push-scout', troopId: 'push-scout', owner: 2, coordinate: '1,-2', permanentDamage: 0 },
@@ -1003,6 +1094,27 @@ test('a pusher can choose either participant sharing a bash hex', () => {
   assert.equal(pushed.bashes.length, 0, 'moving either participant out of the contested hex ends that bash');
 });
 
+test('push can move a bomb and merges its damage into a bomb at the destination', () => {
+  const state = { activePlayer: 1, units: [
+    { troopId: 'wandering-monarch', owner: 1, coordinate: '1,1', permanentDamage: 0 }
+  ], effects: [], bashes: [], bombs: [
+    { owner: 1, sourceTroopId: 'bombardier-beetle', coordinate: '1,0', damage: 2 },
+    { owner: 2, sourceTroopId: 'powder-newt', coordinate: '1,-1', damage: 1 }
+  ], lastActingTroopId: {}, revision: 0, events: [] };
+  const choice = availableActionsFor(state, 1, 'wandering-monarch', cards)
+    .find(action => action.type === 'push' && action.targetBomb && action.coordinate === '1,0');
+  assert.deepEqual(choice, {
+    type: 'push', troopId: 'wandering-monarch', coordinate: '1,0', destination: '1,-1', targetBomb: true
+  });
+
+  const pushed = applyGameAction(state, 1, choice, cards);
+  assert.deepEqual(pushed.bombs, [
+    { owner: 2, sourceTroopId: 'powder-newt', coordinate: '1,-1', damage: 3 }
+  ]);
+  assert.equal(pushed.events.at(-1)?.origin, '1,0');
+  assert.equal(pushed.events.at(-1)?.action.targetBomb, true);
+});
+
 test('passing resolves the turn and creates the same revisioned history as active troop actions', () => {
   const passed = applyGameAction(createGameState(), 1, { type: 'pass' }, cards);
   assert.equal(passed.activePlayer, 2);
@@ -1022,24 +1134,39 @@ test('the turn remains in End while an End card effect awaits its choice', () =>
   assert.equal(nextTurn.activePlayer, 2);
 });
 
-test('cannon applies black magic along its line and ignores shields', () => {
+test('cannon applies friendly-fire black magic along its line and ignores shields', () => {
   const state = {
     activePlayer: 1,
     units: [
       { troopId: 'walnut-crab', owner: 1, coordinate: '1,2', permanentDamage: 0 },
-      { troopId: 'queen-bee', owner: 1, coordinate: '0,2', permanentDamage: 0 },
+      { troopId: 'queen-bee', owner: 1, coordinate: '0,1', permanentDamage: 0 },
       { troopId: 'tiger-queen', owner: 1, coordinate: '1,0', permanentDamage: 0 },
-      { troopId: 'cave-viper', owner: 2, coordinate: '0,1', permanentDamage: 0 },
       { troopId: 'highland-hawk', owner: 2, coordinate: '-1,0', permanentDamage: 0 },
       { troopId: 'squirrel-king', owner: 2, coordinate: '-2,-2', permanentDamage: 0 }
-    ], effects: [{ owner: 2, sourceTroopId: 'iron-armadillo', kind: 'defense', target: '0,1', value: 99 }], bashes: []
+    ], effects: [], bashes: []
   };
   const fired = applyGameAction(state, 1, { type: 'cannon', troopId: 'walnut-crab', coordinate: '-1,0' }, cards);
   assert.deepEqual(fired.effects.filter(effect => effect.kind === 'cannon').map(effect => effect.target), ['0,1', '-1,0']);
   const resolved = applyGameAction(fired, 2, { type: 'magic', troopId: 'squirrel-king', coordinate: '1,1' }, cards);
-  assert.equal(resolved.units.some(unit => unit.troopId === 'cave-viper'), false);
+  assert.equal(resolved.units.find(unit => unit.troopId === 'queen-bee')?.permanentDamage, 2, 'a friendly troop in the line is damaged');
   assert.equal(resolved.units.some(unit => unit.troopId === 'highland-hawk'), false);
   assert.throws(() => applyGameAction(state, 1, { type: 'cannon', troopId: 'walnut-crab', coordinate: '0,0' }, cards), /Invalid hex/);
+});
+
+test('cannon applies visible nonlethal permanent damage when the opponent responds', () => {
+  const state = {
+    activePlayer: 1,
+    units: [
+      { troopId: 'walnut-crab', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+      { troopId: 'marsh-badger', owner: 2, coordinate: '-1,0', permanentDamage: 0 }
+    ],
+    effects: [], bashes: [], lastActingTroopId: {}
+  };
+  const fired = applyGameAction(state, 1, { type: 'cannon', troopId: 'walnut-crab', coordinate: '-1,0' }, cards);
+  assert.equal(fired.units.find(unit => unit.troopId === 'marsh-badger')?.permanentDamage, 0, 'cannon damage remains delayed');
+  const resolved = applyGameAction(fired, 2, { type: 'pass' }, cards);
+  assert.equal(resolved.units.find(unit => unit.troopId === 'marsh-badger')?.permanentDamage, 2);
+  assert.equal(resolved.effects.some(effect => effect.kind === 'cannon'), false);
 });
 
 test('cannon can fire across the central gap to a legal hex beyond it', () => {
@@ -1049,6 +1176,41 @@ test('cannon can fire across the central gap to a legal hex beyond it', () => {
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const fired = applyGameAction(state, 1, { type: 'cannon', troopId: 'coconut-crab', coordinate: '0,1' }, cards);
   assert.deepEqual(fired.effects.filter(effect => effect.kind === 'cannon').map(effect => effect.target), ['0,-1', '0,0', '0,1']);
+});
+
+test('gore moves to a valid line destination and delays enemy physical damage', () => {
+  cards.set('gore-tester', {
+    id: 'gore-tester', name: 'Gore Tester', role: 'troop', baseHealth: 1,
+    deploymentRegions: ['starting'], actions: [{ kind: 'gore', amount: 2, range: 3 }]
+  });
+  const state = { activePlayer: 1, units: [
+    { troopId: 'gore-tester', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+    { troopId: 'tiger-queen', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const fired = applyGameAction(state, 1, { type: 'gore', troopId: 'gore-tester', coordinate: '1,0' }, cards);
+  const gore = fired.effects.find(effect => effect.kind === 'gore');
+  assert.equal(fired.units.find(unit => unit.troopId === 'gore-tester')?.coordinate, '1,0');
+  assert.deepEqual(gore, {
+    owner: 1, sourceTroopId: 'gore-tester', sourceUnitId: '1:gore-tester', targetUnitId: '2:tiger-queen',
+    kind: 'gore', target: '1,0', value: 2, origin: '1,2'
+  });
+  assert.equal(fired.units.find(unit => unit.troopId === 'tiger-queen')?.permanentDamage, 0);
+  assert.equal(fired.bashes.length, 1, 'an enemy destination starts a bash');
+
+  const resolved = applyGameAction(fired, 2, { type: 'pass' }, cards);
+  assert.equal(resolved.units.find(unit => unit.troopId === 'tiger-queen')?.permanentDamage, 1, 'physical gore damage is reduced by the target modifier');
+  assert.equal(resolved.effects.some(effect => effect.kind === 'gore'), false);
+});
+
+test('gore rejects friendly destinations and moves to empty valid destinations', () => {
+  const state = { activePlayer: 1, units: [
+    { troopId: 'gore-tester', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+    { troopId: 'tiger-queen', owner: 1, coordinate: '1,0', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  assert.throws(() => applyGameAction(state, 1, { type: 'gore', troopId: 'gore-tester', coordinate: '1,0' }, cards), /friendly troop/);
+  const empty = applyGameAction(state, 1, { type: 'gore', troopId: 'gore-tester', coordinate: '1,1' }, cards);
+  assert.equal(empty.units.find(unit => unit.troopId === 'gore-tester')?.coordinate, '1,1');
+  assert.equal(empty.effects.some(effect => effect.kind === 'gore'), false);
 });
 
 test('temples are immobile, Spring Temple mends allies, and it cannot mend an enemy', () => {
@@ -1167,11 +1329,11 @@ test('Phoenix Moth death pauses for a 3-damage ranged target within distance 2',
   const death = applyGameAction(state, 2, { type: 'pass' }, cards);
   assert.equal(death.units.some(unit => unit.troopId === 'phoenix-moth'), false);
   assert.deepEqual({ ...death.pendingResolution, stackActionId: undefined }, { owner: 2, turnPlayer: 2, sourceTroopId: 'phoenix-moth', kind: 'death-attack', origin: '1,1', damage: 3, range: 2, stackActionId: undefined });
-  const shieldedDeath = { ...death, effects: [...death.effects, { owner: 1, sourceTroopId: 'snowy-owl', sourceUnitId: '1:snowy-owl', kind: 'defense', target: '1,0', value: 1 }] };
+  const shieldedDeath = { ...death, units: death.units.map(unit => unit.id === '1:snowy-owl' ? { ...unit, shields: [{ value: 1, sourceUnitId: '1:snowy-owl' }] } : unit) };
   const choice = availableActionsFor(shieldedDeath, 2, 'phoenix-moth', cards).find(action => action.type === 'resolve-death-attack' && action.targetUnitId === '1:snowy-owl');
   const resolved = applyGameAction(shieldedDeath, 2, choice, cards);
   assert.equal(resolved.units.some(unit => unit.troopId === 'snowy-owl'), true, 'the shield reduces the death attack and saves its troop');
-  assert.equal(resolved.effects.some(effect => effect.kind === 'defense'), false, 'a shield is consumed when the death attack resolves');
+  assert.equal(resolved.units.find(unit => unit.id === '1:snowy-owl')?.shields, undefined, 'a shield is consumed when the death attack resolves');
   assert.equal(resolved.activePlayer, 1);
 });
 
@@ -1206,19 +1368,44 @@ test('Boar Warlord permanently grows its in-bash bonus after surviving each bash
   assert.ok(combatSummary(nextBash, '1:boar-warlord', cards, '1,0').modifiers.some(entry => entry.label === 'Boar Warlord' && entry.value === 2));
 });
 
-test('hex defense survives for its pending attack, while unrelated defense expires at opponent End', () => {
+test('troop shields survive opponent End until their physical attack resolves', () => {
   const state = { activePlayer: 2, units: [
     { id: '1:tiger-queen', troopId: 'tiger-queen', owner: 1, coordinate: '1,1', permanentDamage: 0 },
     { id: '2:queen-bee', troopId: 'queen-bee', owner: 2, coordinate: '-1,0', permanentDamage: 0 }
-  ], effects: [
-    { owner: 1, sourceTroopId: 'moss-tortoise', kind: 'defense', target: '1,1', value: 2 },
-    { owner: 1, sourceTroopId: 'moss-tortoise', kind: 'defense', target: '2,2', value: 2 }
-  ], bashes: [], lastActingTroopId: {} };
+  ], effects: [], bashes: [], lastActingTroopId: {}, };
+  state.units[0].shields = [{ value: 2, sourceUnitId: '1:moss-tortoise' }];
   const fired = applyGameAction(state, 2, { type: 'attack', troopId: 'queen-bee', coordinate: '1,1' }, cards);
-  assert.deepEqual(fired.effects.filter(effect => effect.kind === 'defense').map(effect => effect.target), ['1,1'], 'only the shield awaiting resolution remains after opponent End');
+  assert.deepEqual(fired.units.find(unit => unit.troopId === 'tiger-queen')?.shields?.map(shield => shield.value), [2], 'the troop shield remains until its physical attack resolves');
   const resolved = applyGameAction(fired, 1, { type: 'pass' }, cards);
   assert.equal(resolved.units.find(unit => unit.troopId === 'tiger-queen')?.permanentDamage, 0, 'the tile shield and controlled-region modifier block the attack');
-  assert.equal(resolved.effects.some(effect => effect.kind === 'defense'), false, 'the attacked tile consumes its shield when the attack resolves');
+  assert.equal(resolved.units.find(unit => unit.troopId === 'tiger-queen')?.shields, undefined, 'the attacked troop consumes its shield when the attack resolves');
+});
+
+test('Pierce ranged attacks ignore physical modifiers but still consume shields', () => {
+  const state = { activePlayer: 2, units: [
+    { id: '2:pierce-test', troopId: 'pierce-test', owner: 2, coordinate: '-1,0', permanentDamage: 0 },
+    { id: '1:alps-lone-wolf', troopId: 'alps-lone-wolf', owner: 1, coordinate: '1,1', permanentDamage: 1, shields: [{ value: 2, sourceUnitId: '1:alps-lone-wolf' }] }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const fired = applyGameAction(state, 2, { type: 'attack', troopId: 'pierce-test', coordinate: '1,1' }, cards);
+  assert.equal(fired.effects[0].pierce, true);
+  const resolved = applyGameAction(fired, 1, { type: 'pass' }, cards);
+  const target = resolved.units.find(unit => unit.id === '1:alps-lone-wolf');
+  assert.equal(target?.permanentDamage, 2, 'the full Pierce value is applied despite the injured modifier');
+  assert.equal(target?.shields, undefined, 'Pierce still consumes a physical shield');
+});
+
+test('Magic Defense protects friendly troops and self magic defense is card-specific', () => {
+  const state = { activePlayer: 1, units: [
+    { id: '1:magic-defense-test', troopId: 'magic-defense-test', owner: 1, coordinate: '0,1', permanentDamage: 0 },
+    { id: '1:squirrel-king', troopId: 'squirrel-king', owner: 1, coordinate: '0,-1', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const protectedState = applyGameAction(state, 1, { type: 'magic-defense', troopId: 'magic-defense-test', coordinate: '0,-1' }, cards);
+  assert.equal(protectedState.units.find(unit => unit.id === '1:squirrel-king')?.magicModifierBonus, 2);
+  assert.equal(availableActionsFor(state, 1, 'magic-defense-test', cards).some(action => action.type === 'self-magic-defense'), false);
+  const selfState = { activePlayer: 1, units: [{ id: '1:self-magic-defense-test', troopId: 'self-magic-defense-test', owner: 1, coordinate: '0,1', permanentDamage: 0 }], effects: [], bashes: [], lastActingTroopId: {} };
+  assert.ok(availableActionsFor(selfState, 1, 'self-magic-defense-test', cards).some(action => action.type === 'self-magic-defense'));
+  const selfProtected = applyGameAction(selfState, 1, { type: 'self-magic-defense', troopId: 'self-magic-defense-test' }, cards);
+  assert.equal(selfProtected.units[0].magicModifierBonus, 2);
 });
 
 test('Cherub Sprout death revives one previously defeated non-hero card', () => {
@@ -1246,7 +1433,7 @@ test('Canyon Hawk steady reduces only its bash opponent’s modifier to zero on 
   ], effects: [], bashes: [{ attackerId: '1:canyon-hawk', defenderId: '2:alps-lone-wolf', target: '1,0' }], lastActingTroopId: { 1: 'canyon-hawk' } };
   assert.equal(combatBreakdown(hawkAttacking, '1:canyon-hawk', cards, '1,0').modifier, 1, 'Steady leaves the Hawk’s own control modifier intact');
   assert.equal(combatBreakdown(hawkAttacking, '2:alps-lone-wolf', cards, '1,0').modifier, 0, 'Steady suppresses the defender’s injured bonus');
-  const shieldedHawkAttack = { ...hawkAttacking, effects: [{ owner: 2, sourceTroopId: 'iron-armadillo', kind: 'defense', target: '1,0', value: 3 }] };
+  const shieldedHawkAttack = { ...hawkAttacking, units: hawkAttacking.units.map(unit => unit.id === '2:alps-lone-wolf' ? { ...unit, shields: [{ value: 3, sourceUnitId: '2:iron-armadillo' }] } : unit) };
   assert.equal(combatBreakdown(shieldedHawkAttack, '2:alps-lone-wolf', cards, '1,0').modifier, 0, 'Steady also suppresses a confirmed shield');
 
   const hawkDefending = { activePlayer: 1, units: [
@@ -1309,4 +1496,24 @@ test('a troop moving into a lit bomb radius before resolution takes the explosio
   const moved = applyGameAction(lit, 2, { type: 'move', troopId: 'tiger-queen', coordinate: '1,0' }, cards);
   assert.equal(moved.units.find(unit => unit.id === '2:tiger-queen').coordinate, '1,0');
   assert.equal(moved.units.find(unit => unit.id === '2:tiger-queen').permanentDamage, 2, 'B is damaged after moving into an adjacent blast hex');
+});
+
+test('bomb explosions ignite a line of inert bombs one turn at a time', () => {
+  const state = { activePlayer: 2, units: [], effects: [
+    { owner: 1, sourceTroopId: 'bombardier-beetle', kind: 'bomb', target: '1,-1', value: 2, origin: '1,-1' },
+    { owner: 1, sourceTroopId: 'bombardier-beetle', kind: 'bomb', target: '1,0', value: 2, origin: '1,-1' }
+  ], bashes: [], bombs: [
+    { owner: 1, sourceTroopId: 'bombardier-beetle', coordinate: '1,0', damage: 2 },
+    { owner: 1, sourceTroopId: 'bombardier-beetle', coordinate: '1,1', damage: 2 }
+  ], lastActingTroopId: {} };
+
+  const firstExplosion = applyGameAction(state, 2, { type: 'pass' }, cards);
+  assert.deepEqual(firstExplosion.bombs?.map(bomb => bomb.coordinate), ['1,1'], 'only the bomb reached by the first blast is lit');
+  assert.equal(firstExplosion.effects.filter(effect => effect.kind === 'bomb' && effect.origin === '1,0').length, 6, 'the central gap is excluded from this blast');
+  assert.equal(firstExplosion.effects.some(effect => effect.kind === 'bomb' && effect.origin === '1,-1'), false, 'the resolved explosion is consumed');
+
+  const secondExplosion = applyGameAction(firstExplosion, 1, { type: 'pass' }, cards);
+  assert.deepEqual(secondExplosion.bombs, [], 'the second blast lights the next bomb in the line');
+  assert.equal(secondExplosion.effects.filter(effect => effect.kind === 'bomb' && effect.origin === '1,1').length, 6, 'off-board neighbors are excluded from the final blast');
+  assert.equal(secondExplosion.effects.some(effect => effect.kind === 'bomb' && effect.origin === '1,0'), false, 'each chain link resolves on a separate turn');
 });

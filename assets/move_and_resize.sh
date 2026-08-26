@@ -1,2 +1,2 @@
-mv ~/Downloads/"$(ls -tr ~/Downloads | tail -n 1)" $1
-convert $1 -resize 128x128 $1
+mv ~/Downloads/"$(ls -tr ~/Downloads | tail -n 1)" high_resolution/$1
+convert high_resolution/$1 -resize 200x $1

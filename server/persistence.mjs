@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
 export class Persistence {
@@ -8,33 +9,79 @@ export class Persistence {
     this.waitingPlayers = waitingPlayers;
     this.queuedMatches = queuedMatches;
     this.runtimeFile = resolve(dataDirectory, 'runtime.json');
+    this.runtimeBackupFile = resolve(dataDirectory, 'runtime.backup.json');
     this.matchLogDirectory = resolve(dataDirectory, 'match-logs');
     this.sandboxDirectory = resolve(dataDirectory, 'sandboxes');
     // WebSocket close handlers and shutdown can persist the same match at the
     // same time. Serialize log writes so retention cannot unlink a file that
     // another writer is still using.
     this.matchLogQueue = Promise.resolve();
+    this.runtimeWriteQueue = Promise.resolve();
   }
 
   async loadRuntime() {
-    try {
-      const runtime = JSON.parse(await readFile(this.runtimeFile, 'utf8'));
-      this.matchStore.restore(runtime.matches);
-      for (const [format, player] of runtime.waitingPlayers ?? []) this.waitingPlayers.set(Number(format), player);
-      for (const [nickname, matchId] of runtime.queuedMatches ?? []) this.queuedMatches.set(nickname, matchId);
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-    }
+    const runtime = await this.#readRuntimeWithFallback();
+    if (!runtime) return;
+    this.matchStore.restore(runtime.matches);
+    for (const [format, player] of runtime.waitingPlayers ?? []) this.waitingPlayers.set(Number(format), player);
+    for (const [nickname, matchId] of runtime.queuedMatches ?? []) this.queuedMatches.set(nickname, matchId);
   }
 
-  async saveRuntime() {
-    await mkdir(this.dataDirectory, { recursive: true });
-    const runtime = {
+  saveRuntime() {
+    const payload = JSON.stringify({
       matches: this.matchStore.snapshot(),
       waitingPlayers: [...this.waitingPlayers],
       queuedMatches: [...this.queuedMatches]
-    };
-    await writeFile(this.runtimeFile, JSON.stringify(runtime, null, 2), 'utf8');
+    }, null, 2);
+    const write = this.runtimeWriteQueue.then(() => this.#writeRuntime(payload));
+    this.runtimeWriteQueue = write.catch(() => {});
+    return write;
+  }
+
+  async #writeRuntime(payload) {
+    await mkdir(this.dataDirectory, { recursive: true });
+    // A shared temp filename is unsafe when an old server process is still
+    // running: one process can rename another process's partially-written
+    // temp file into place. Use a private file for every save, then publish
+    // only after the complete payload has been written.
+    const runtimeTemporaryFile = resolve(
+      this.dataDirectory,
+      `runtime.json.tmp-${process.pid}-${randomUUID()}`
+    );
+    try {
+      await writeFile(runtimeTemporaryFile, payload, 'utf8');
+      try {
+        JSON.parse(await readFile(this.runtimeFile, 'utf8'));
+        await rename(this.runtimeFile, this.runtimeBackupFile);
+      } catch (error) {
+        if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      }
+      await rename(runtimeTemporaryFile, this.runtimeFile);
+    } finally {
+      await unlink(runtimeTemporaryFile).catch(error => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    }
+  }
+
+  async #readRuntimeWithFallback() {
+    try {
+      return JSON.parse(await readFile(this.runtimeFile, 'utf8'));
+    } catch (primaryError) {
+      if (primaryError.code === 'ENOENT') {
+        try { return JSON.parse(await readFile(this.runtimeBackupFile, 'utf8')); }
+        catch (backupError) {
+          if (backupError.code === 'ENOENT') return undefined;
+          throw backupError;
+        }
+      }
+      if (!(primaryError instanceof SyntaxError)) throw primaryError;
+      try { return JSON.parse(await readFile(this.runtimeBackupFile, 'utf8')); }
+      catch (backupError) {
+        if (backupError.code === 'ENOENT') throw primaryError;
+        throw new AggregateError([primaryError, backupError], 'Both runtime.json and runtime.backup.json are invalid.');
+      }
+    }
   }
 
   /** Persist a self-contained diagnostic trail and retain the ten newest logs. */

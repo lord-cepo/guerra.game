@@ -2,9 +2,9 @@ export type RegionType = 'starting' | 'intermediate' | 'front';
 /** Temples occupy and control a hex like troops, but have no movement action. */
 export type TroopRole = 'hero' | 'troop' | 'temple';
 
-export type ActionKind = 'phase' | 'deploy' | 'pass' | 'move' | 'fly' | 'ranged' | 'cannon' | 'fire' | 'defense' | 'bomb' | 'push' | 'mending' | 'upgrade' | 'heal' | 'damage' | 'modifier' | 'revive';
+export type ActionKind = 'phase' | 'deploy' | 'pass' | 'move' | 'fly' | 'ranged' | 'cannon' | 'gore' | 'fire' | 'defense' | 'bomb' | 'push' | 'pull' | 'stun' | 'mending' | 'upgrade' | 'heal' | 'damage' | 'modifier' | 'revive';
 export type ActionAmount = number | readonly number[];
-export type ActionQualifier = 'start' | 'action' | 'action-resolve' | 'combat-resolve' | 'end' | 'instant' | 'optional' | 'adjacent' | 'permanent' | 'attack' | 'bash';
+export type ActionQualifier = 'start' | 'action' | 'action-resolve' | 'combat-resolve' | 'end' | 'instant' | 'optional' | 'adjacent' | 'permanent' | 'attack' | 'magic' | 'bash' | 'pierce';
 
 /** The common, serializable dictionary used by active and triggered actions. */
 export interface CardAction {
@@ -25,10 +25,11 @@ export interface LegacyActionView {
   left?: number;
   right?: number;
   usesHealth?: boolean;
+  qualifiers?: readonly ActionQualifier[];
 }
 export type AttackAction = LegacyActionView;
 
-export type UpgradableAbility = 'move' | 'fly' | 'attack' | 'cannon' | 'bomb' | 'push' | 'magic' | 'defense' | 'self-defense' | 'mending' | 'upgrade';
+export type UpgradableAbility = 'move' | 'fly' | 'attack' | 'cannon' | 'gore' | 'bomb' | 'push' | 'pull' | 'stun' | 'magic' | 'defense' | 'magic-defense' | 'self-defense' | 'self-magic-defense' | 'mending' | 'upgrade';
 
 /** A condition whose effect exists only while the condition remains true. */
 export type ContinuousCondition = 'bash-attacker' | 'bash-attacker-vs-hero' | 'in-bash' | 'injured' | 'shielded' | 'shielded-by-ally' | 'deployed';
@@ -37,7 +38,7 @@ export type ContinuousEffect =
   | { condition: 'deployed'; kind: 'ability-bonus'; ability: 'move' | 'attack' | 'magic'; left?: number; right?: number; label: string };
 
 /** A one-shot event and the state change resolved each time it occurs. */
-export type EventCondition = 'start' | 'end' | 'opponentStart' | 'opponentEnd' | 'bashAttack' | 'bashDefense' | 'bashRetreat' | 'bashResolved' | 'bash' | 'magicUsed' | 'successfulAttack' | 'movementUsed' | 'death';
+export type EventCondition = 'start' | 'end' | 'opponentStart' | 'opponentEnd' | 'deploy' | 'bashAttack' | 'bashDefense' | 'bashRetreat' | 'bashResolved' | 'bash' | 'magicUsed' | 'successfulAttack' | 'movementUsed' | 'death';
 export type EventResolution =
   CardAction;
 export interface TriggerCondition { kind?: ActionKind; type?: readonly ActionQualifier[]; signal?: EventCondition; subject?: 'self' | 'ally' | 'enemy'; }
@@ -55,7 +56,14 @@ export interface TroopSeed {
   passiveDescription?: string;
   ruleDescription?: string;
   deploymentRule?: 'enemy-region';
+  /** First Strike: damage the opposing bash participant before it can retaliate. */
+  firstStrike?: boolean;
   selfDefense?: number;
+  /** Troops with this property may defend themselves against magic directly. */
+  selfMagicDefense?: number;
+  /** Immune to all magic or physical damage sources respectively. */
+  obsidian?: boolean;
+  titanium?: boolean;
   /** Control X — contribute X additional control while deployed. */
   control?: number;
   continuousEffects?: readonly ContinuousEffect[];
@@ -65,12 +73,20 @@ export interface TroopSeed {
 interface ActionOptions {
   fly?: number;
   attack?: readonly [range: number, damage?: number];
+  attackType?: readonly ActionQualifier[];
   defense?: readonly [block: number, range: number];
+  magicDefense?: readonly [block: number, range: number];
   magic?: readonly [damage: number, range: number];
   cannon?: readonly [damage: number, range: number];
+  /** M🐏N: gore M physical damage at range N after moving to the target hex. */
+  gore?: readonly [damage: number, range: number];
   bomb?: readonly [damage: number, range: number];
   /** M🫸N: push M hexes, select a target up to N hexes away. */
   push?: readonly [distance: number, range: number];
+  /** M🫷N: pull M hexes, select a target up to N hexes away. */
+  pull?: readonly [distance: number, range: number];
+  /** N🚫M: stun for N turns at range M. */
+  stun?: readonly [turns: number, range: number];
   /** M❤️N: mend M health at distance N. */
   mending?: readonly [amount: number, range: number];
   /** M🔮N: temporarily raise an active's left/right numbers. */
@@ -80,12 +96,16 @@ interface ActionOptions {
 function actions(move = 1, options: ActionOptions = {}): readonly TroopAction[] {
   const result: TroopAction[] = move > 0 ? [{ kind: 'move', range: move }] : [];
   if (options.fly) result.push({ kind: 'fly', range: options.fly });
-  if (options.attack) result.push({ kind: 'ranged', ...(options.attack[1] === undefined ? {} : { amount: options.attack[1] }), range: options.attack[0] });
+  if (options.attack) result.push({ kind: 'ranged', ...(options.attack[1] === undefined ? {} : { amount: options.attack[1] }), range: options.attack[0], ...(options.attackType ? { type: options.attackType } : {}) });
   if (options.defense) result.push({ kind: 'defense', amount: options.defense[0], range: options.defense[1] });
+  if (options.magicDefense) result.push({ kind: 'defense', amount: options.magicDefense[0], range: options.magicDefense[1], type: ['magic'] });
   if (options.magic) result.push({ kind: 'fire', amount: options.magic[0], range: options.magic[1] });
   if (options.cannon) result.push({ kind: 'cannon', amount: options.cannon[0], range: options.cannon[1] });
+  if (options.gore) result.push({ kind: 'gore', amount: options.gore[0], range: options.gore[1] });
   if (options.bomb) result.push({ kind: 'bomb', amount: options.bomb[0], range: options.bomb[1] });
   if (options.push) result.push({ kind: 'push', amount: options.push[0], range: options.push[1] });
+  if (options.pull) result.push({ kind: 'pull', amount: options.pull[0], range: options.pull[1] });
+  if (options.stun) result.push({ kind: 'stun', amount: options.stun[0], range: options.stun[1] });
   if (options.mending) result.push({ kind: 'mending', amount: options.mending[0], range: options.mending[1] });
   if (options.upgrade) result.push({ kind: 'upgrade', amount: [options.upgrade.left ?? 0, options.upgrade.right ?? 0], range: options.upgrade.range });
   return result;
@@ -100,9 +120,28 @@ export const troopSeeds: readonly TroopSeed[] = [
   { id: 'wandering-monarch', name: 'Wandering Monarch', role: 'hero', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(1, { push: [1, 2], defense: [2, 1] }), triggers: [{ id: 'end-stride', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'move', range: 1, type: ['optional'] } }], passiveDescription: 'End: 🥾1', ruleDescription: 'End stride: at the end of your turn, you may move this hero 1 hex or decline and finish the turn.' },
   { id: 'mole-artificer', name: 'Mole Artificer', role: 'hero', baseHealth: 4, deploymentRegions: ['starting'], actions: actions(1, { bomb: [2, 2], magic: [1, 2] }) },
   { id: 'stag-guardian', name: 'Stag Guardian', role: 'hero', baseHealth: 4, deploymentRegions: ['starting'], actions: actions(1, { defense: [2, 2] }), triggers: [{ id: 'renewal', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'heal', amount: 1, range: 0 } }], passiveDescription: 'Start: +1❤️', ruleDescription: 'Renewal: at the start of your turn, heals 1 permanent damage.' },
-  { id: 'raven-prince', name: 'Raven Prince', role: 'hero', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 3 }), triggers: [{ id: 'dusk-strike', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'ranged', amount: 1, range: 1, type: ['instant', 'optional'] } }], passiveDescription: 'End: 1🏹❗1', ruleDescription: 'Dusk strike: at the end of your turn, you may choose a hex within 1. It immediately receives 1 physical ranged damage.' },
+  { id: 'raven-prince', name: 'Raven Prince', role: 'hero', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 3 }), triggers: [{ id: 'dusk-stun', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'stun', amount: 1, range: 1 } }], passiveDescription: 'End: 1🚫1', ruleDescription: 'Dusk stun: at the end of your turn, choose an enemy troop within 1. It becomes inactive for 1 turn and loses its shields and modifiers.' },
   { id: 'boar-warlord', name: 'Boar Warlord', role: 'hero', baseHealth: 6, deploymentRegions: ['starting'], actions: actions(1), continuousEffects: [{ condition: 'in-bash', kind: 'combat-modifier', value: 1, label: 'Boar Warlord' }], triggers: [{ id: 'battle-hardened', condition: { signal: 'bashResolved', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent', 'bash'] } }], passiveDescription: '+1 if ⚔️\n⚔️→+1', ruleDescription: 'Battle-hardened: gains +1 in a bash. After each bash, this bonus permanently increases by 1.' },
-  { id: 'tortoise-emperor', name: 'Tortoise Emperor', role: 'hero', baseHealth: 7, deploymentRegions: ['starting'], actions: actions(0), triggers: [{ id: 'imperial-shelter', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'defense', amount: 1, range: 1, type: ['adjacent'] } }], passiveDescription: '🥾0\nEnd: adj +1🛡️', ruleDescription: 'Imperial shelter: at the end of your turn, each adjacent friendly occupied hex gains 1 defense. Defense remains on its hex if that ally moves.' },
+  { id: 'tortoise-emperor', name: 'Tortoise Emperor', role: 'hero', baseHealth: 7, deploymentRegions: ['starting'], actions: actions(0), triggers: [{ id: 'imperial-shelter', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'defense', amount: 1, range: 1, type: ['adjacent'] } }], passiveDescription: '🥾0\nEnd: adj +1🛡️', ruleDescription: 'Imperial shelter: at the end of your turn, each adjacent friendly troop gains 1 shield. The shield follows that troop, and is consumed by a physical attack over it or by that troop’s true action.' },
+
+  { id: 'thunder-toad', name: 'Thunder Toad', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(1, { stun: [1, 1] }) },
+  { id: 'bellwing-crane', name: 'Bellwing Crane', role: 'troop', baseHealth: 2, deploymentRegions: ['front'], actions: actions(0, { fly: 2, stun: [1, 2] }) },
+  { id: 'frosthorn-yak', name: 'Frosthorn Yak', role: 'troop', baseHealth: 4, deploymentRegions: ['starting', 'intermediate'], actions: actions(0, { stun: [2, 1] }), triggers: [{ id: 'frosthorn-call', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'pull', amount: 2, range: 3 } }], passiveDescription: 'Start: 2🫷3', ruleDescription: 'Frosthorn call: at the start of its turn, choose a troop within 3 and pull it 2 hexes toward this troop.' },
+  { id: 'duelist-scorpion', name: 'Duelist Scorpion', role: 'troop', baseHealth: 2, deploymentRegions: ['front'], actions: actions(2, { stun: [1, 1] }), triggers: [{ id: 'duelist-deploy', condition: { signal: 'deploy', subject: 'self' }, action: { kind: 'modifier', amount: [3, 3], range: 0, type: ['permanent'] } }], passiveDescription: 'Deploy: +3 +3', ruleDescription: 'Duelist: when deployed, permanently gains +3 physical and +3 magic modifier.' },
+  { id: 'needle-peacock', name: 'Needle Peacock', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 2, attack: [2, 1], attackType: ['pierce'] }), triggers: [{ id: 'needle-sting', condition: { signal: 'successfulAttack', subject: 'self' }, action: { kind: 'stun', amount: 1, range: 0 } }], passiveDescription: '1P🏹2; hits: 1🚫 to target', ruleDescription: 'Needle sting: when its attack damages an enemy, that target is stunned for 1 turn.' },
+  { id: 'iron-bell-golem', name: 'Iron Bell Golem', role: 'troop', baseHealth: 4, deploymentRegions: ['intermediate'], actions: actions(1, { stun: [2, 1] }), titanium: true, triggers: [{ id: 'iron-bell-deploy', condition: { signal: 'deploy', subject: 'self' }, action: { kind: 'modifier', amount: [0, -3], range: 0, type: ['permanent'] } }], passiveDescription: '2🚫1; Titanium; Deploy: -3 purple', ruleDescription: 'Titanium: ignores physical attack and Gore damage. On deployment, it permanently receives -3 magic modifier.' },
+  { id: 'merino-ram', name: 'Merino Ram', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(0, { gore: [2, 3] }) },
+  { id: 'prism-moth', name: 'Prism Moth', role: 'troop', baseHealth: 1, deploymentRegions: ['starting'], actions: actions(0, { fly: 2, attack: [1, 2], attackType: ['instant'] }), triggers: [{ id: 'prismatic-bash', condition: { signal: 'bash', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent', 'magic'] } }], passiveDescription: '⚔️: +1 purple modifier', ruleDescription: 'Prismatic bash: after it is involved in a bash, it permanently gains +1 magic modifier.' },
+  { id: 'warding-bat', name: 'Warding Bat', role: 'troop', baseHealth: 1, deploymentRegions: ['front'], actions: actions(0, { fly: 2 }), triggers: [{ id: 'dawn-fire', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'fire', amount: 1, range: 1, type: ['instant'] } }], passiveDescription: 'Start: 1F🔥1', ruleDescription: 'Dawn fire: at the start of its turn, choose a hex within 1 for 1 immediate magic damage.' },
+  { id: 'arcane-viper', name: 'Arcane Viper', role: 'troop', baseHealth: 2, deploymentRegions: ['starting', 'intermediate'], actions: actions(1, { magic: [2, 2] }), triggers: [{ id: 'arcane-resonance', condition: { signal: 'magicUsed', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent', 'magic'] } }], passiveDescription: '🔥: +1 purple modifier', ruleDescription: 'Arcane resonance: after it uses Magic, it permanently gains +1 magic modifier.' },
+  { id: 'komodo-dragon', name: 'Komodo Dragon', role: 'troop', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(1), selfDefense: 3, selfMagicDefense: 3, passiveDescription: '3🛡️ 3 purple🛡️', ruleDescription: 'Fortified: can use both Self Defense and Self Magic Defense.' },
+  { id: 'ironhide-boar-pup', name: 'Ironhide Boar Pup', role: 'troop', baseHealth: 1, deploymentRegions: ['starting'], actions: actions(1, { gore: [1, 3] }), triggers: [{ id: 'gore-hardened', condition: { signal: 'successfulAttack', kind: 'gore', subject: 'self' }, action: { kind: 'modifier', amount: [1, 1], range: 0, type: ['permanent'] } }], passiveDescription: '🐏🩸: +1 +1', ruleDescription: 'Gore-hardened: when its Gore damages an enemy, it permanently gains +1 physical modifier and +1 magic modifier.' },
+  { id: 'needle-mantis', name: 'Needle Mantis', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 2, attack: [3, 1], attackType: ['pierce'] }) },
+  { id: 'deep-ocean-octopus', name: 'Deep Ocean Octopus', role: 'troop', baseHealth: 5, deploymentRegions: ['starting', 'intermediate'], actions: actions(0, { pull: [3, 3] }), triggers: [{ id: 'tentacle-grip', condition: { signal: 'bash', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: '⚔️: +1', ruleDescription: 'Tentacle grip: after it is involved in a bash, it permanently gains +1 physical modifier.' },
+  { id: 'thornback-archer', name: 'Thornback Archer', role: 'troop', baseHealth: 3, deploymentRegions: ['front'], actions: actions(1, { attack: [2, 2], attackType: ['pierce'] }) },
+  { id: 'spellshield-beetle', name: 'Spellshield Beetle', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(1), triggers: [{ id: 'spellshield', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent', 'magic'] } }, { id: 'carapace', condition: { signal: 'bash', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: 'Start: +1 purple\n⚔️: +1', ruleDescription: 'Spellshield: starts each turn with a permanent +1 magic modifier; after it is involved in a bash, it permanently gains +1 physical modifier.' },
+  { id: 'obsidian-lizard', name: 'Obsidian Lizard', role: 'troop', baseHealth: 2, deploymentRegions: ['front'], actions: actions(1), selfDefense: 2, obsidian: true, passiveDescription: 'Obsidian', ruleDescription: 'Obsidian: immune to magic damage sources.' },
+  { id: 'battle-magpie', name: 'Battle Magpie', role: 'troop', baseHealth: 1, deploymentRegions: ['front'], actions: actions(0, { fly: 2, attack: [2, 1], attackType: ['pierce'] }), triggers: [{ id: 'magpie-strike', condition: { signal: 'successfulAttack', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: '🏹🩸: +1', ruleDescription: 'Battle magpie: after it damages an enemy with an attack, it permanently gains +1 physical modifier.' },
 
   { id: 'bramble-empress', name: 'Bramble Empress', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(1, { push: [3, 1] }) },
   { id: 'ember-salamander', name: 'Ember Salamander', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(1, { magic: [3, 2] }) },
@@ -127,7 +166,7 @@ export const troopSeeds: readonly TroopSeed[] = [
   { id: 'iron-armadillo', name: 'Iron Armadillo', role: 'troop', baseHealth: 1, deploymentRegions: ['starting', 'intermediate'], actions: actions(1, { defense: [3, 1] }) },
   { id: 'volcanic-gecko', name: 'Volcanic Gecko', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(1, { magic: [4, 1] }) },
   { id: 'highland-hawk', name: 'Highland Hawk', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(1, { attack: [2] }) },
-  { id: 'ironscale-rhino', name: 'Ironscale Rhino', role: 'troop', baseHealth: 5, deploymentRegions: ['starting'], actions: actions(1, { defense: [3, 2] }), deploymentRule: 'enemy-region' },
+  { id: 'ironscale-rhino', name: 'Ironscale Rhino', role: 'troop', baseHealth: 6, deploymentRegions: ['starting'], actions: actions(1, { defense: [3, 2] }), deploymentRule: 'enemy-region' },
   { id: 'sahel-porcupine', name: 'Sahel Porcupine', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(2, { attack: [1, 1] }), triggers: [{ id: 'momentum', condition: { signal: 'bashAttack', subject: 'self' }, action: { kind: 'upgrade', amount: [1, 1], range: 0, type: ['permanent', 'attack'] } }], passiveDescription: '⚔️: +1🏹+1', ruleDescription: 'Momentum: when this troop starts a bash, it permanently gains a stackable magenta +1 ranged damage and +1 range upgrade.' },
   { id: 'alps-lone-wolf', name: 'Alps Lone Wolf', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(2), continuousEffects: [{ condition: 'injured', kind: 'combat-modifier', value: 2, label: 'Alps Lone Wolf' }], passiveDescription: '+2 if 🩸', ruleDescription: 'Tenacity: gains +2 combat modifier while injured.' },
   { id: 'canyon-hawk', name: 'Canyon Hawk', role: 'troop', baseHealth: 3, deploymentRegions: ['front'], actions: actions(0, { fly: 2 }), passiveDescription: 'Steady', ruleDescription: 'Steady: its opponent has 0 combat modifier while this unit is in a bash.' },
@@ -139,13 +178,13 @@ export const troopSeeds: readonly TroopSeed[] = [
   { id: 'bramble-scout', name: 'Bramble Scout', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(2, { push: [1, 2] }) },
 
   { id: 'spring-temple', name: 'Spring Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['starting', 'intermediate'], actions: actions(0, { mending: [1, 3] }) },
-  { id: 'oracle-temple', name: 'Oracle Temple', role: 'temple', baseHealth: 2, deploymentRegions: ['front'], actions: actions(0, { upgrade: { left: 1, right: 0, range: 1 } }) },
-  { id: 'water-temple', name: 'Water Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(0, { upgrade: { left: 1, right: 1, range: 2 } }), deploymentRule: 'enemy-region' },
-  { id: 'war-temple', name: 'War Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['front'], actions: actions(0), continuousEffects: [{ condition: 'in-bash', kind: 'combat-modifier', value: 1, label: 'War Temple', scope: 'allies' }], passiveDescription: '+1 if ⚔️', ruleDescription: 'War aura: your units gain +1 combat modifier while in a bash.' },
-  { id: 'ranged-power-temple', name: 'Ranged Power Temple', role: 'temple', baseHealth: 2, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'attack', left: 1, label: 'Ranged Power Temple' }], passiveDescription: '+1🏹', ruleDescription: 'Ranged power aura: your units gain +1 ranged damage while this temple is deployed.' },
-  { id: 'magic-power-temple', name: 'Magic Power Temple', role: 'temple', baseHealth: 2, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'magic', left: 1, label: 'Magic Power Temple' }], passiveDescription: '+1🔥', ruleDescription: 'Magic power aura: your units gain +1 magic damage while this temple is deployed.' },
-  { id: 'magic-range-temple', name: 'Magic Range Temple', role: 'temple', baseHealth: 2, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'magic', right: 1, label: 'Magic Range Temple' }], passiveDescription: '🔥+1', ruleDescription: 'Magic range aura: your units gain +1 magic range while this temple is deployed.' },
-  { id: 'ranged-range-temple', name: 'Ranged Range Temple', role: 'temple', baseHealth: 2, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'attack', right: 1, label: 'Ranged Range Temple' }], passiveDescription: '🏹+1', ruleDescription: 'Ranged range aura: your units gain +1 ranged range while this temple is deployed.' },
-  { id: 'temple-last-bell', name: 'Temple of the Last Bell', role: 'temple', baseHealth: 1, deploymentRegions: ['front'], actions: actions(0), triggers: [{ id: 'last-bell', condition: { signal: 'death', subject: 'self' }, action: { kind: 'ranged', amount: [3, 2], range: 3, type: ['instant'] } }], passiveDescription: '💀: 2×3🏹❗3', ruleDescription: 'Last bell: when this temple dies, choose a hex within 3 twice. Each chosen hex immediately receives 3 physical ranged damage and may be chosen more than once.' },
-  { id: 'temple-marches', name: 'Temple of Marches', role: 'temple', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'move', right: 1, label: 'Temple of Marches' }], passiveDescription: '🥾+1', ruleDescription: 'March aura: your units gain +1 Move range while this temple is deployed.' },
+  { id: 'oracle-temple', name: 'Oracle Temple', role: 'temple', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(0, { upgrade: { left: 1, right: 0, range: 1 } }) },
+  { id: 'water-temple', name: 'Water Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['front'], actions: actions(0, { upgrade: { left: 1, right: 1, range: 2 } }) },
+  { id: 'war-temple', name: 'War Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(0), continuousEffects: [{ condition: 'in-bash', kind: 'combat-modifier', value: 1, label: 'War Temple', scope: 'allies' }], passiveDescription: '+1 if ⚔️', ruleDescription: 'War aura: your units gain +1 combat modifier while in a bash.' },
+  { id: 'ranged-power-temple', name: 'Ranged Power Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'attack', left: 1, label: 'Ranged Power Temple' }], passiveDescription: '+1🏹', ruleDescription: 'Ranged power aura: your units gain +1 ranged damage while this temple is deployed.' },
+  { id: 'magic-power-temple', name: 'Magic Power Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'magic', left: 1, label: 'Magic Power Temple' }], passiveDescription: '+1🔥', ruleDescription: 'Magic power aura: your units gain +1 magic damage while this temple is deployed.' },
+  { id: 'magic-range-temple', name: 'Magic Range Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'magic', right: 1, label: 'Magic Range Temple' }], passiveDescription: '🔥+1', ruleDescription: 'Magic range aura: your units gain +1 magic range while this temple is deployed.' },
+  { id: 'ranged-range-temple', name: 'Ranged Range Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'attack', right: 1, label: 'Ranged Range Temple' }], passiveDescription: '🏹+1', ruleDescription: 'Ranged range aura: your units gain +1 ranged range while this temple is deployed.' },
+  { id: 'temple-last-bell', name: 'Temple of the Last Bell', role: 'temple', baseHealth: 2, deploymentRegions: ['starting', 'intermediate'], actions: actions(0), triggers: [{ id: 'last-bell', condition: { signal: 'death', subject: 'self' }, action: { kind: 'ranged', amount: [3, 2], range: 3, type: ['instant'] } }], passiveDescription: '💀: 2×3F🏹3', ruleDescription: 'Last bell: when this temple dies, choose a hex within 3 twice. Each chosen hex immediately receives 3 physical ranged damage and may be chosen more than once.' },
+  { id: 'temple-marches', name: 'Temple of Marches', role: 'temple', baseHealth: 2, deploymentRegions: ['front'], actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'move', right: 1, label: 'Temple of Marches' }], passiveDescription: '🥾+1', ruleDescription: 'March aura: your units gain +1 Move range while this temple is deployed.' },
 ];

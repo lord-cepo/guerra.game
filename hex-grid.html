@@ -28,6 +28,10 @@
       color: var(--text);
       font: 16px "Kalam", "Segoe Print", "Bradley Hand", cursive;
     }
+    html.app-busy,
+    html.app-busy * {
+      cursor: progress !important;
+    }
     body.local-player-one { --action-colour: #ef4444; --action-fill: rgb(239 68 68 / .20); }
     body.local-player-two { --action-colour: #3b82f6; --action-fill: rgb(59 130 246 / .20); }
     main {
@@ -410,6 +414,8 @@
     }
     .board-troop-description .player-one-health { fill: #d96b6b; }
     .board-troop-description .player-two-health { fill: #6f96d8; }
+    .damage-resolution-health.player-one-health { fill: #d96b6b; }
+    .damage-resolution-health.player-two-health { fill: #6f96d8; }
     .board-troop-description .upgraded-effect { fill: #c084fc; }
     .board-troop-description .static-effect { fill: #f472b6; }
     .action-land { font-size: 12px; font-weight: 800; text-anchor: middle; pointer-events: none; user-select: none; }
@@ -433,6 +439,12 @@
     }
     .bash-left-picture { clip-path: inset(0 50% 0 0); }
     .bash-right-picture { clip-path: inset(0 0 0 50%); }
+    @keyframes bash-attacker-arrive {
+      0% { opacity: 0; translate: 0 55px; }
+      100% { opacity: 1; translate: 0 0; }
+    }
+    #board .bash-entrance-attacker { animation: bash-attacker-arrive .8s ease-in-out; }
+    #board .board-unit-visual.bash-transition-source > :not(.board-troop) { display: none; }
     .cell.bash-focus-left .bash-left-picture,
     .cell.bash-focus-right .bash-right-picture { clip-path: inset(0); }
     .cell.bash-focus-left .bash-right-picture { clip-path: inset(0 0 0 100%); opacity: 0; }
@@ -569,17 +581,18 @@
       fill: transparent !important;
       stroke: transparent !important;
     }
-    /* Board interaction language: legal destinations rise above the board,
-       free cells get only a quiet shadow, and occupied cells animate their art. */
+    /* Available and staged destinations settle continuously into their compact
+       position. Keeping the SVG cells mounted lets the transition run in both
+       directions when target classes are added or removed. */
     #board .cell {
-      transition: transform .18s ease, filter .18s ease;
-    }
-    #board .cell.action-target,
-    #board .cell.server-pending-target,
-    #board .cell.server-reachable {
-      transform: translateY(-3px) scale(.95);
+      transform: translateY(0) scale(1);
       transform-box: fill-box;
       transform-origin: center;
+      transition: transform 1s cubic-bezier(.22, .72, .24, 1), filter .18s ease;
+    }
+    #board .cell.action-target,
+    #board .cell.server-reachable:not(.server-pending-target) {
+      transform: translateY(3px) scale(.95);
     }
     #board .cell.action-target > .hex,
     #board .cell.server-pending-target > .hex,
@@ -591,11 +604,22 @@
     }
     #board .cell.action-target > .hex-border-overlay,
     #board .cell.server-reachable:not(.server-pending-target) > .hex-border-overlay {
-      fill: rgb(255 255 255 / .12) !important;
+      fill: rgb(255 255 255 / .24) !important;
       stroke: transparent !important;
     }
-    #board .cell:not(.center):not(.server-occupied):hover > .hex-border-overlay {
-      fill: rgb(0 0 0 / .08) !important;
+    /* A staged or confirmed action must not leave an owner-coloured target
+       wash behind. Only availability and direct pointer hover are visible. */
+    #board .cell.server-pending-target > .hex,
+    #board .cell.server-pending-target > .hex-border-overlay,
+    #board .cell.server-remote-pending-target > .hex,
+    #board .cell.server-remote-pending-target > .hex-border-overlay,
+    #board .cell.server-action-highlight > .hex,
+    #board .cell.server-action-highlight > .hex-border-overlay {
+      fill: transparent !important;
+      stroke: transparent !important;
+    }
+    #board .cell:not(.center):hover > .hex-border-overlay {
+      fill: rgb(0 0 0 / .12) !important;
       stroke: transparent !important;
     }
     #board .cell.center {
@@ -623,6 +647,19 @@
       animation: troop-deploy-fall 1.4s cubic-bezier(.2, .72, .3, 1) both;
       will-change: translate, opacity;
     }
+    #board .board-unit-visual.troop-deploy-in-animation {
+      animation: troop-deploy-fall 1.4s cubic-bezier(.2, .72, .3, 1) both;
+      will-change: translate, opacity;
+    }
+    @keyframes troop-deploy-out {
+      from { opacity: 1; translate: 0 0; }
+      to { opacity: 0; translate: 0 -150px; }
+    }
+    #board .board-unit-visual.troop-deploy-out-animation {
+      animation: troop-deploy-out 1.4s cubic-bezier(.2, .72, .3, 1) both;
+      pointer-events: none;
+      will-change: translate, opacity;
+    }
     @keyframes troop-move-out {
       from { opacity: 1; translate: 0 0; }
       to { opacity: 0; translate: 0 55px; }
@@ -648,25 +685,113 @@
       animation: troop-push-in .78s cubic-bezier(.06, .78, .18, 1) both;
       will-change: translate;
     }
+    @keyframes troop-push-out {
+      from { translate: 0 0; }
+      to { translate: var(--push-from-x, 0) var(--push-from-y, 0); }
+    }
+    #board .board-unit-visual.troop-push-out-animation {
+      animation: troop-push-out .78s cubic-bezier(.06, .78, .18, 1) both;
+      pointer-events: none;
+      will-change: translate;
+    }
     .bomb-action-icon,
     .bomb-flight { pointer-events: none; }
-    .bomb-unlit-preview { filter: drop-shadow(0 1px 2px rgb(15 23 42 / .55)); }
-    .bomb-pencil-trajectory {
-      fill: none;
-      stroke: rgb(65 54 40 / .4);
-      stroke-width: 1.6;
-      stroke-linecap: round;
-      stroke-dasharray: 1;
-      stroke-dashoffset: 1;
+    .bomb-push-animation {
+      animation: troop-push-in .78s cubic-bezier(.06, .78, .18, 1) both;
       pointer-events: none;
-      animation: bomb-pencil-trace 2.8s linear forwards;
+      will-change: translate;
     }
-    @keyframes bomb-pencil-trace {
-      0% { stroke-dashoffset: 1; }
-      32.15% { stroke-dashoffset: 0; }
-      67.85% { stroke-dashoffset: 0; }
-      100% { stroke-dashoffset: -1; }
+    .bomb-awaiting-arrival { opacity: 0; }
+    .bomb-explosion {
+      pointer-events: none;
+      animation: bomb-explosion-burst .9s ease-in-out both;
     }
+    .bomb-explosion-highlight {
+      fill: #9333ea;
+      fill-opacity: .25;
+    }
+    @keyframes bomb-explosion-burst {
+      0% { opacity: 1; clip-path: inset(100% 0 0 0); }
+      38% { opacity: 1; clip-path: inset(0); }
+      68% { opacity: 1; clip-path: inset(0); }
+      100% { opacity: 0; clip-path: inset(0); }
+    }
+    .physical-modifier-awaiting-impact { opacity: 0; }
+    .damage-resolution-slash {
+      pointer-events: none;
+      animation: damage-slash-sweep 1.5s linear both;
+    }
+    @keyframes damage-slash-sweep {
+      0% { opacity: 0; clip-path: inset(0 0 100% 0); }
+      8% { opacity: 1; clip-path: inset(0 0 100% 0); }
+      44% { opacity: 1; clip-path: inset(0); }
+      60% { opacity: 1; clip-path: inset(0); }
+      100% { opacity: 0; clip-path: inset(100% 0 0 0); }
+    }
+    .death-resolution-card,
+    .death-resolution-skull { pointer-events: none; }
+    .death-resolution-skull {
+      animation: death-skull-reveal 1.1s ease-in-out both;
+    }
+    @keyframes death-skull-reveal {
+      0% { opacity: 1; clip-path: inset(0 0 100% 0); }
+      55% { opacity: 1; clip-path: inset(0); }
+      100% { opacity: 0; clip-path: inset(0); }
+    }
+    #board .cell.damage-resolving .board-health { opacity: 0; }
+    #board .cell.bash-resolving > .board-unit-visual { opacity: 0; }
+    .shield-animation-frame {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .magic-shield-animation,
+    .magic-shield-icon {
+      filter: hue-rotate(235deg) saturate(1.8);
+    }
+    .magic-modifier { fill: #c084fc; }
+    .shield-flight { pointer-events: none; }
+    .bomb-damage-label {
+      fill: #f8fafc;
+      font-size: 12px;
+      font-weight: 800;
+      text-anchor: end;
+      pointer-events: none;
+      user-select: none;
+      stroke: rgb(15 23 42 / .8);
+      stroke-width: 1px;
+      paint-order: stroke fill;
+      filter: drop-shadow(0 1px 1px #0f172a) drop-shadow(0 0 2px #0f172a);
+    }
+    .projectile-flight {
+      pointer-events: none;
+    }
+    .mending-flight-heart,
+    .mending-resolution-heart {
+      pointer-events: none;
+      text-anchor: middle;
+      dominant-baseline: central;
+      user-select: none;
+    }
+    .mending-flight-heart {
+      font-size: 25px;
+    }
+    .mending-resolution-heart {
+      font-size: 62px;
+      animation: damage-slash-sweep 1.5s linear both;
+    }
+    .projectile-orientation {
+      pointer-events: none;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+    .projectile-trail-segment {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .projectile-magic { filter: drop-shadow(0 1px 2px rgb(70 35 18 / .55)); }
+    .projectile-attack { filter: drop-shadow(0 1px 1px rgb(15 23 42 / .6)); }
+    .projectile-bomb { filter: drop-shadow(0 1px 2px rgb(15 23 42 / .55)); }
+    .projectile-upgrade { filter: drop-shadow(0 1px 2px rgb(88 28 135 / .55)); }
     #board .cell.server-occupied:not(.server-last-acting):not(.center):hover .board-card-picture {
       transform-box: fill-box;
       transform-origin: center;
@@ -679,6 +804,10 @@
     #board .last-acting-troop .board-card-picture {
       filter: grayscale(.76) sepia(.68) saturate(1.12) hue-rotate(-7deg) brightness(1.08);
       animation: none !important;
+    }
+    #board .inactive-troop-wash {
+      fill: rgb(107 114 128 / .5);
+      pointer-events: none;
     }
     #board .cell.server-last-acting .action-description-highlight {
       display: none;
@@ -710,11 +839,22 @@
       outline: none !important;
     }
     @media (prefers-reduced-motion: reduce) {
+      #board .cell { transition-duration: 0s; }
       #board .cell.server-occupied:hover .board-card-picture { animation: none; }
       #board .board-unit-visual.deploy-fall-animation { animation: none; }
+      #board .board-unit-visual.troop-deploy-in-animation,
+      #board .board-unit-visual.troop-deploy-out-animation,
       #board .board-unit-visual.troop-move-out-animation,
       #board .board-unit-visual.troop-move-in-animation,
-      #board .board-unit-visual.troop-push-in-animation { animation: none; }
+      #board .board-unit-visual.troop-push-in-animation,
+      #board .board-unit-visual.troop-push-out-animation,
+      #board .bomb-push-animation,
+      #board .bash-entrance-attacker,
+      #board .bash-entrance-border { animation: none; }
+      #board .damage-resolution-slash { animation: none; opacity: .8; }
+      #board .bomb-explosion { animation: none; opacity: .8; clip-path: none; }
+      #board .mending-resolution-heart { animation: none; opacity: .8; }
+      #board .death-resolution-skull { animation: none; opacity: .8; clip-path: none; }
     }
     /* Selection is communicated by the action controls, not another card frame. */
     .troop-card.selected-card,
@@ -865,6 +1005,15 @@
     #action-bar button { border: 1px solid #64748b; border-radius: .35rem; background: #172033; color: #e2e8f0; padding: .35rem .6rem; cursor: pointer; }
     #action-bar button:disabled { cursor: not-allowed; opacity: .42; }
     #action-bar button.active-action { border-color: #f8fafc; background: #334155; }
+    #action-bar input.deck-builder-search {
+      min-width: min(20rem, 42vw);
+      border: 1px solid #64748b;
+      border-radius: .35rem;
+      background: #172033;
+      color: #f8fafc;
+      padding: .35rem .6rem;
+    }
+    #action-bar input.deck-builder-search::placeholder { color: #94a3b8; }
     #connection-status { min-height: 1.25rem; margin: .35rem 0 0; text-align: center; color: #94a3b8; font-size: .82rem; }
     #connection-status.connected { color: #86efac; }
     #connection-status.reconnecting, #connection-status.disconnected { color: #fcd34d; }

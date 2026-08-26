@@ -301,10 +301,16 @@ export class MatchStore {
     // the next side is immediately interactive without a manual side swap.
     if (match.sandboxOwner) match.sandboxSide = nextPlayer;
     const lastActor = match.game.lastActingTroopId?.[nextPlayer];
-    const hasAvailableCard = match.decks[nextPlayer].some(troopId =>
-      troopId !== lastActor && !match.game.defeatedTroopIds?.includes(`${nextPlayer}:${troopId}`)
+    const hasNonStunnedCard = match.decks[nextPlayer].some(troopId =>
+      !match.game.defeatedTroopIds?.includes(`${nextPlayer}:${troopId}`)
+      && !(match.game.units.find(unit => unit.owner === nextPlayer && unit.troopId === troopId)?.stunnedTurns ?? 0)
     );
-    if (!hasAvailableCard) match.game.winner = nextPlayer === 1 ? 2 : 1;
+    const hasAvailableCard = match.decks[nextPlayer].some(troopId =>
+      troopId !== lastActor
+      && !match.game.defeatedTroopIds?.includes(`${nextPlayer}:${troopId}`)
+      && !(match.game.units.find(unit => unit.owner === nextPlayer && unit.troopId === troopId)?.stunnedTurns ?? 0)
+    );
+    if (hasNonStunnedCard && !hasAvailableCard) match.game.winner = nextPlayer === 1 ? 2 : 1;
     // A completed action is no longer a selection. The acting troop is shown
     // by its authoritative unavailable/grey state instead.
     match.selections[player] = undefined;

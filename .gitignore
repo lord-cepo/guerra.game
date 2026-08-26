@@ -28,3 +28,6 @@ data/match-logs/
 # Operating-system files
 .DS_Store
 Thumbs.db
+
+# images
+assets/high_resolution
