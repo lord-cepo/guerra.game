@@ -98,20 +98,21 @@ export class MatchStore {
       const attacker = game.units.find(unit => unit.id === bash.attackerId || `${unit.owner}:${unit.troopId}` === bash.attackerId);
       if (attacker) attacker.coordinate = bash.target;
     }
-    // A saved sandbox resumes on the side whose turn it is. New playgrounds
-    // start with Blue, while saved checkpoints retain their exact turn.
+    const resolutionOwner = game.pendingResolution?.owner;
+    // A saved sandbox resumes with a pending trigger selected when one exists;
+    // otherwise it resumes on the side whose normal turn it is.
     const match = {
       id,
       status: 'active',
       sandboxOwner: nickname,
-      sandboxSide: game.activePlayer,
+      sandboxSide: resolutionOwner ?? game.activePlayer,
       sandboxFreePlacement: false,
       players: { 1: nickname, 2: nickname },
       format: state.format,
       ready: { 1: true, 2: true },
       decks: structuredClone(state.decks),
       deckChoices: { 1: 0, 2: 0 },
-      selections: { 1: undefined, 2: undefined },
+      selections: { 1: undefined, 2: undefined, ...(resolutionOwner ? { [resolutionOwner]: game.pendingResolution.sourceTroopId } : {}) },
       targetSelections: { 1: undefined, 2: undefined },
       game,
       diagnostics: { createdAt: new Date().toISOString(), snapshots: [] }
@@ -340,7 +341,7 @@ export class MatchStore {
       const available = availableActionsFor(match.game, player, troopId, this.cardsById);
       const targetIsAvailable = available.some(action =>
         action.type === target.type
-        && (action.type === 'self-defense' || ('coordinate' in action && action.coordinate === target.coordinate))
+        && (action.type === 'self-defense' || action.type === 'self-magic-defense' || ('coordinate' in action && action.coordinate === target.coordinate))
       );
       if (!targetIsAvailable) throw new Error('Destination is out of range.');
     }

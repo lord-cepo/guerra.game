@@ -4,6 +4,7 @@ import {
   type ActionQualifier,
   type ContinuousEffect,
   type LegacyActionView,
+  type PassiveKind,
   type RegionType,
   type TroopAction,
   type TroopRole,
@@ -30,6 +31,7 @@ export interface Troop {
   owner: Player;
   role: TroopRole;
   actions: readonly TroopAction[];
+  passives?: readonly PassiveKind[];
   triggers?: readonly TriggerDefinition[];
   deploymentRegions: readonly RegionType[];
   passiveDescription?: string;
@@ -71,6 +73,38 @@ export function createTroopView(cardId: string, owner: Player, unit?: ServerUnit
 /** The card catalogue is the single source for names shown throughout the UI. */
 export function troopDisplayName(troop: Troop): string {
   return troop.name ?? (troop.role === 'hero' ? `Player ${troop.owner} hero` : `Player ${troop.owner} troop`);
+}
+
+interface PassivePresentation {
+  compact: string;
+  rule: string;
+}
+
+const passivePresentations: Record<PassiveKind, PassivePresentation> = {
+  'first-strike': {
+    compact: 'First Strike',
+    rule: 'First Strike: deals bash damage before the opponent can retaliate; a defeated opponent does not retaliate.'
+  },
+  obsidian: {
+    compact: 'Obsidian',
+    rule: 'Obsidian: immune to magic damage sources.'
+  },
+  titanium: {
+    compact: 'Titanium',
+    rule: 'Titanium: immune to physical Attack and Gore damage.'
+  },
+  steady: {
+    compact: 'Steady',
+    rule: 'Steady: its opponent has 0 combat modifier while this unit is in a bash.'
+  }
+};
+
+export function passiveCompactDescriptions(troop: Troop): string[] {
+  return (troop.passives ?? []).map(passive => passivePresentations[passive].compact);
+}
+
+export function passiveRuleDescriptions(troop: Troop): string[] {
+  return (troop.passives ?? []).map(passive => passivePresentations[passive].rule);
 }
 
 const trayRolePriority: Record<TroopRole, number> = {
@@ -185,6 +219,24 @@ function attackPrefix(action: LegacyActionView): string {
   return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}`;
 }
 
+function magicPrefix(action: LegacyActionView): string {
+  const qualifiers: readonly ActionQualifier[] = action.qualifiers ?? [];
+  return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}`;
+}
+
+/** A compact summary line is a magic shield only when explicitly marked with
+ * the magic `~...~` marker and matching the card's magic-defense capability,
+ * so an equal-valued physical self-defense line stays a normal shield. */
+export function isMagicShieldSummaryText(troop: Troop, text: string): boolean {
+  const withoutUpgrade = text.replace(/^🔮\s*/u, '');
+  if (!withoutUpgrade.startsWith('~') || !withoutUpgrade.endsWith('~')) return false;
+  const normalized = withoutUpgrade.replace(/^~|~$/g, '');
+  const ranged = actionOfType(troop, 'magic-defense');
+  const rangedText = ranged ? `${ranged.block + upgradeBonus(troop, 'magic-defense').left} 🛡️ ${ranged.range + upgradeBonus(troop, 'magic-defense').right}` : undefined;
+  const selfText = troop.selfMagicDefense !== undefined ? `${troop.selfMagicDefense + upgradeBonus(troop, 'self-magic-defense').left} 🛡️` : undefined;
+  return normalized === rangedText || normalized === selfText;
+}
+
 export function serverCardDetails(troop: Troop): string[] {
   const move = actionOfType(troop, 'move');
   const fly = actionOfType(troop, 'fly');
@@ -204,13 +256,21 @@ export function serverCardDetails(troop: Troop): string[] {
     const bonus = upgradeBonus(troop, ability);
     return bonus.left || bonus.right ? `🔮 ${text}` : text;
   };
-  return [
-    move && move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right > 1 ? detail('move', `🥾 ${move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right}`) : '',
+  const selfDefense = troop.selfDefense !== undefined
+    ? detail('self-defense', `${troop.selfDefense + upgradeBonus(troop, 'self-defense').left} 🛡️`)
+    : '';
+  const selfMagicDefense = troop.selfMagicDefense !== undefined
+    ? `~${detail('self-magic-defense', `${troop.selfMagicDefense + upgradeBonus(troop, 'self-magic-defense').left} 🛡️`)}~`
+    : '';
+  return [...new Set([
+    move && move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right > 1 ? detail('move', `🥾 ${move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right}`) : move || fly || troop.role === 'temple' ? '' : '🥾 0',
     fly ? detail('fly', `🪽 ${fly.maxDistance + upgradeBonus(troop, 'fly').right}`) : '',
     attack ? detail('attack', `${rangedDamage(troop, attack) + upgradeBonus(troop, 'attack').left + staticAuraBonus(troop, 'attack').left} ${attackPrefix(attack)}🏹 ${rangedRange(troop, attack) + upgradeBonus(troop, 'attack').right + staticAuraBonus(troop, 'attack').right}`) : '',
     defense ? detail('defense', `${defense.block + upgradeBonus(troop, 'defense').left} 🛡️ ${defense.range + upgradeBonus(troop, 'defense').right}`) : '',
-    magicDefense ? detail('magic-defense', `${magicDefense.block + upgradeBonus(troop, 'magic-defense').left} 🛡️ ${magicDefense.range + upgradeBonus(troop, 'magic-defense').right}`) : '',
-    magic ? detail('magic', `${magic.damage + (troop.magicDamageBonus ?? 0) + upgradeBonus(troop, 'magic').left + staticAuraBonus(troop, 'magic').left} 🔥 ${magic.range + (troop.magicRangeBonus ?? 0) + upgradeBonus(troop, 'magic').right + staticAuraBonus(troop, 'magic').right}`) : '',
+    magicDefense ? `~${detail('magic-defense', `${magicDefense.block + upgradeBonus(troop, 'magic-defense').left} 🛡️ ${magicDefense.range + upgradeBonus(troop, 'magic-defense').right}`)}~` : '',
+    selfDefense,
+    selfMagicDefense,
+    magic ? detail('magic', `${magic.damage + (troop.magicDamageBonus ?? 0) + upgradeBonus(troop, 'magic').left + staticAuraBonus(troop, 'magic').left} ${magicPrefix(magic)}🔥 ${magic.range + (troop.magicRangeBonus ?? 0) + upgradeBonus(troop, 'magic').right + staticAuraBonus(troop, 'magic').right}`) : '',
     cannon ? detail('cannon', `${cannon.damage + upgradeBonus(troop, 'cannon').left} 🧨 ${cannon.range + upgradeBonus(troop, 'cannon').right}`) : '',
     gore ? detail('gore', `${gore.damage + upgradeBonus(troop, 'gore').left} ${goreIcon} ${gore.range + upgradeBonus(troop, 'gore').right}`) : '',
     bomb ? detail('bomb', `${bomb.damage + upgradeBonus(troop, 'bomb').left} 💣 ${bomb.range + upgradeBonus(troop, 'bomb').right}`) : '',
@@ -220,8 +280,9 @@ export function serverCardDetails(troop: Troop): string[] {
     mending ? detail('mending', `${mending.amount + upgradeBonus(troop, 'mending').left} ❤️ ${mending.range + upgradeBonus(troop, 'mending').right}`) : '',
     upgrade ? detail('upgrade', `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`) : '',
     troop.control ? `Control ${troop.control}` : '',
+    ...passiveCompactDescriptions(troop),
     ...(troop.passiveDescription?.split('\n') ?? [])
-  ].filter(Boolean);
+  ].filter(Boolean))];
 }
 
 export interface BoardDescriptionLine {
@@ -230,9 +291,11 @@ export interface BoardDescriptionLine {
   upgraded?: boolean;
   staticLeft?: boolean;
   staticRight?: boolean;
+  magicModifier?: boolean;
 }
 
 export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, revealMoveOne = false): BoardDescriptionLine[] {
+  void revealMoveOne;
   const move = actionOfType(troop, 'move');
   const fly = actionOfType(troop, 'fly');
   const attack = actionOfType(troop, 'attack');
@@ -253,12 +316,13 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
 
   if (includeSelfBlock || (troop.selfDefense ?? 1) + selfBonus.left > 1) abilities.push({ text: `${(troop.selfDefense ?? 1) + selfBonus.left} 🛡️`, action: 'self-defense', upgraded: Boolean(selfBonus.left) });
   if (move) { const value = bonus('move'); const aura = staticAuraBonus(troop, 'move'); if (move.maxDistance + value.right + aura.right > 1 || revealMoveOne) abilities.push({ text: `🥾 ${move.maxDistance + value.right + aura.right}`, action: 'move', upgraded: Boolean(value.right), staticRight: Boolean(aura.right) }); }
+  else if (!fly && troop.role !== 'temple') abilities.push({ text: '🥾 0', action: 'move' });
   if (fly) { const value = bonus('fly'); abilities.push({ text: `🪽 ${fly.maxDistance + value.right}`, action: 'fly', upgraded: Boolean(value.right) }); }
   if (attack) { const value = bonus('attack'); const aura = staticAuraBonus(troop, 'attack'); const permanent = permanentUpgradeBonus(troop, 'attack'); abilities.push({ text: `${rangedDamage(troop, attack) + value.left + aura.left} ${attackPrefix(attack)}🏹 ${rangedRange(troop, attack) + value.right + aura.right}`, action: 'attack', upgraded: Boolean(value.left || value.right), staticLeft: Boolean(aura.left || permanent.left), staticRight: Boolean(aura.right || permanent.right) }); }
   if (defense) { const value = bonus('defense'); abilities.push({ text: `${defense.block + value.left} 🛡️ ${defense.range + value.right}`, action: 'defense', upgraded: Boolean(value.left || value.right) }); }
   if (magicDefense) { const value = bonus('magic-defense'); abilities.push({ text: `${magicDefense.block + value.left} 🛡️ ${magicDefense.range + value.right}`, action: 'magic-defense', upgraded: Boolean(value.left || value.right) }); }
-  if (includeSelfBlock || (troop.selfMagicDefense ?? 0) + bonus('self-magic-defense').left > 0) abilities.push({ text: `${(troop.selfMagicDefense ?? 0) + bonus('self-magic-defense').left} 🛡️`, action: 'self-magic-defense', upgraded: Boolean(bonus('self-magic-defense').left) });
-  if (magic) { const value = bonus('magic'); const aura = staticAuraBonus(troop, 'magic'); const permanent = permanentUpgradeBonus(troop, 'magic'); abilities.push({ text: `${magic.damage + permanent.left + value.left + aura.left} 🔥 ${magic.range + permanent.right + value.right + aura.right}`, action: 'magic', upgraded: Boolean(value.left || value.right), staticLeft: Boolean(aura.left || permanent.left), staticRight: Boolean(aura.right || permanent.right) }); }
+  if ((troop.selfMagicDefense ?? 0) + bonus('self-magic-defense').left > 0) abilities.push({ text: `${(troop.selfMagicDefense ?? 0) + bonus('self-magic-defense').left} 🛡️`, action: 'self-magic-defense', upgraded: Boolean(bonus('self-magic-defense').left) });
+  if (magic) { const value = bonus('magic'); const aura = staticAuraBonus(troop, 'magic'); const permanent = permanentUpgradeBonus(troop, 'magic'); abilities.push({ text: `${magic.damage + permanent.left + value.left + aura.left} ${magicPrefix(magic)}🔥 ${magic.range + permanent.right + value.right + aura.right}`, action: 'magic', upgraded: Boolean(value.left || value.right), staticLeft: Boolean(aura.left || permanent.left), staticRight: Boolean(aura.right || permanent.right) }); }
   if (cannon) { const value = bonus('cannon'); abilities.push({ text: `${cannon.damage + value.left} 🧨 ${cannon.range + value.right}`, action: 'cannon', upgraded: Boolean(value.left || value.right) }); }
   if (gore) { const value = bonus('gore'); abilities.push({ text: `${gore.damage + value.left} ${goreIcon} ${gore.range + value.right}`, action: 'gore', upgraded: Boolean(value.left || value.right) }); }
   if (bomb) { const value = bonus('bomb'); abilities.push({ text: `${bomb.damage + value.left} 💣 ${bomb.range + value.right}`, action: 'bomb', upgraded: Boolean(value.left || value.right) }); }
@@ -272,7 +336,8 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
   const passiveLines = troop.passiveDescription?.split('\n').filter(Boolean) ?? [];
   const contentLines: BoardDescriptionLine[] = [
     ...abilities,
-    ...passiveLines.map(text => ({ text }))
+    ...passiveCompactDescriptions(troop).map(text => ({ text })),
+    ...passiveLines.map(text => ({ text, magicModifier: /~[^~]+~/u.test(text) }))
   ];
   // A board hex always owns health plus exactly three information rows.
   // Preserve the final row's action metadata when marking overflow so
@@ -313,7 +378,7 @@ export function actionDetails(troop: Troop): string[] {
     }
     if (action.type === 'cannon') {
       const damage = action.damage + bonus.left; const distance = action.range + bonus.right;
-      return `${damage}🧨${distance} (cannon): ${damage} black-magic damage to every troop along a straight line up to distance ${distance}; resolves after the opponent acts, allows friendly fire, and ignores modifiers.`;
+      return `${damage}🧨${distance} (cannon): ${damage} black-magic damage to every troop along a straight line up to distance ${distance}; resolves after the opponent acts, allows friendly fire, ignores physical modifiers but is reduced by magic shields.`;
     }
     if (action.type === 'gore') {
       const damage = action.damage + bonus.left; const distance = action.range + bonus.right;
@@ -321,7 +386,7 @@ export function actionDetails(troop: Troop): string[] {
     }
     if (action.type === 'bomb') {
       const damage = action.damage + bonus.left; const distance = action.range + bonus.right;
-      return `${damage}💣${distance} (bomb): throw an inert ${damage}-damage bomb at distance ${distance}; a hex that already contains a bomb cannot receive another. Fire magic lights it, then its black-magic damage resolves after the next action on its hex and all adjacent hexes, affecting both players and ignoring modifiers.`;
+      return `${damage}💣${distance} (bomb): throw an inert ${damage}-damage bomb at distance ${distance}; a hex that already contains a bomb merges the new damage into it. Fire magic lights it, then its black-magic damage resolves after the next action on its hex and all adjacent hexes, affecting both players, ignoring physical modifiers but reduced by magic shields.`;
     }
     if (action.type === 'push' || action.type === 'pull') {
       const displacementDistance = action.maxDistance + bonus.left; const targetDistance = action.range + bonus.right;
@@ -344,7 +409,8 @@ export function actionDetails(troop: Troop): string[] {
     const aura = staticAuraBonus(troop, 'magic');
     const damage = action.damage + (troop.magicDamageBonus ?? 0) + bonus.left + aura.left;
     const distance = action.range + (troop.magicRangeBonus ?? 0) + bonus.right + aura.right;
-    return `${damage}🔥${distance} (magic): ${damage} damage at distance ${distance}; resolves after the opponent acts, ignores shields, and kills only if lethal.`;
+    const instant = action.qualifiers?.includes('instant'); const pierce = action.qualifiers?.includes('pierce');
+    return `${damage}${magicPrefix(action)}🔥${distance} (magic): ${damage} damage at distance ${distance}; ${instant ? 'resolves immediately' : 'resolves after the opponent acts'}, ignores shields, and kills only if lethal. Fire magic lights inert bombs; instant fire detonates them immediately${pierce ? '; pierce fire ignores the magic shield, makes bombs it lights pierce Obsidian magic immunity, and is marked with P' : ''}.`;
   });
 }
 
@@ -363,6 +429,7 @@ export function cardRuleDetails(troop: Troop): string[] {
     rules.push(`${block}🛡️ (self magic defense): add ${block} magic shield to itself.`);
   }
   if (troop.control) rules.push(`Control ${troop.control}: this unit contributes ${troop.control} additional control to its current region.`);
+  rules.push(...passiveRuleDescriptions(troop));
   if (troop.ruleDescription) rules.push(troop.ruleDescription);
   return rules;
 }
@@ -384,13 +451,14 @@ export function fullEffectLines(troop: Troop): string[] {
   const upgrade = actionOfType(troop, 'upgrade');
   const effects: string[] = [];
   if (move && move.maxDistance + upgradeBonus(troop, 'move').right > 1) effects.push(`${move.maxDistance} 🥾`);
+  else if (!move && !fly && troop.role !== 'temple') effects.push('0 🥾');
   if (fly) effects.push(`${fly.maxDistance} 🪽`);
   if ((troop.selfDefense ?? 1) + upgradeBonus(troop, 'self-defense').left > 1) effects.push(`${troop.selfDefense ?? 1} 🛡️`);
-  if ((troop.selfMagicDefense ?? 0) + upgradeBonus(troop, 'self-magic-defense').left > 0) effects.push(`${troop.selfMagicDefense ?? 0} 🛡️`);
+  if ((troop.selfMagicDefense ?? 0) + upgradeBonus(troop, 'self-magic-defense').left > 0) effects.push(`~${troop.selfMagicDefense ?? 0} 🛡️~`);
   if (attack) effects.push(`${rangedDamage(troop, attack)} ${attackPrefix(attack)}🏹 ${rangedRange(troop, attack)}`);
   if (defense) effects.push(`${defense.block} 🛡️ ${defense.range}`);
-  if (magicDefense) effects.push(`${magicDefense.block} 🛡️ ${magicDefense.range}`);
-  if (magic) effects.push(`${magic.damage} 🔥 ${magic.range}`);
+  if (magicDefense) effects.push(`~${magicDefense.block} 🛡️ ${magicDefense.range}~`);
+  if (magic) effects.push(`${magic.damage} ${magicPrefix(magic)}🔥 ${magic.range}`);
   if (cannon) effects.push(`${cannon.damage} 🧨 ${cannon.range}`);
   if (gore) effects.push(`${gore.damage}${goreIcon}${gore.range}`);
   if (bomb) effects.push(`${bomb.damage} 💣 ${bomb.range}`);
@@ -400,8 +468,9 @@ export function fullEffectLines(troop: Troop): string[] {
   if (mending) effects.push(`${mending.amount} ❤️ ${mending.range}`);
   if (upgrade) effects.push(`${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`);
   if (troop.control) effects.push(`Control ${troop.control}`);
+  effects.push(...passiveCompactDescriptions(troop));
   if (troop.passiveDescription) effects.push(...troop.passiveDescription.split('\n').filter(Boolean));
-  return effects;
+  return [...new Set(effects)];
 }
 
 /** Keep compact board and card summaries readable without overflowing them. */

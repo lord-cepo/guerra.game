@@ -85,6 +85,36 @@ test('a loaded sandbox resumes on its saved active player side', () => {
   assert.equal(store.playerFor(sandbox.id, 'alice'), 2);
 });
 
+test('a loaded sandbox restores a pending trigger selection and its legal targets', () => {
+  const store = new MatchStore(cards);
+  const triggerDeck = ['tiger-queen', 'raven-prince', ...deck.slice(2)];
+  const sandbox = store.createSandbox('alice', {
+    format: 8, decks: { 1: triggerDeck, 2: triggerDeck }, activePlayer: 1, phase: 'end',
+    units: [
+      { id: '2:raven-prince', troopId: 'raven-prince', owner: 2, coordinate: '1,1', permanentDamage: 0 },
+      { id: '1:arcane-viper', troopId: 'arcane-viper', owner: 1, coordinate: '0,1', permanentDamage: 0 }
+    ], effects: [], bashes: [], lastActingTroopId: {}, defeatedTroopIds: [], revision: 7, events: [],
+    pendingResolution: { owner: 2, turnPlayer: 2, sourceTroopId: 'raven-prince', kind: 'stun', origin: '1,1', turns: 1, range: 1 }
+  });
+  assert.equal(sandbox.sandboxSide, 2);
+  assert.equal(sandbox.selections[2], 'raven-prince');
+  assert.ok(sandbox.legalActions[2].some(action => action.type === 'resolve-stun' && action.coordinate === '0,1'));
+});
+
+test('Komodo Dragon self magic defense accepts its UI self-selection coordinate', () => {
+  const store = new MatchStore(cards);
+  const komodoDeck = ['tiger-queen', 'komodo-dragon', ...deck.slice(2)];
+  const sandbox = store.createSandbox('alice', {
+    format: 8, decks: { 1: komodoDeck, 2: komodoDeck }, activePlayer: 2,
+    units: [{ id: '2:komodo-dragon', troopId: 'komodo-dragon', owner: 2, coordinate: '1,2', permanentDamage: 0 }],
+    effects: [], bashes: [], lastActingTroopId: {}, defeatedTroopIds: [], revision: 4, events: []
+  });
+  const selected = store.setSelection(sandbox.id, 'alice', 'komodo-dragon', { type: 'self-magic-defense', coordinate: '1,2' });
+  assert.deepEqual(selected.targetSelections[2], { troopId: 'komodo-dragon', type: 'self-magic-defense', coordinate: '1,2' });
+  const protectedState = store.applyAction(sandbox.id, 'alice', { type: 'self-magic-defense', troopId: 'komodo-dragon' });
+  assert.equal(protectedState.units.find(unit => unit.id === '2:komodo-dragon')?.combat.magicModifier, 3);
+});
+
 test('loading an older playground moves a pending bash attacker off its obsolete origin', () => {
   const store = new MatchStore(cards);
   const sandbox = store.createSandbox('alice', {
@@ -150,7 +180,7 @@ test('accepted actions update the revisioned public state', () => {
   const starter = created.players[1];
   const next = store.applyAction(created.id, starter, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
   assert.equal(next.revision, 1);
-  assert.equal(next.units[0].currentHealth, 6);
+  assert.equal(next.units[0].currentHealth, 5);
   assert.deepEqual(next.events[0].action, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
 });
 

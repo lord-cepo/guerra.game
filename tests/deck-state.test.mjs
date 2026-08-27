@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { addDeckCard, clearDeckSlots, completedDeckFormats, createDeckSlots, isCompleteDeck, moveDeckCard, removeDeckCard, selectedDeckCards, swapDeckCards } from '../dist/client/deck-state.js';
-import { boardDescriptionEntries, cardRuleDetails, compareTroopsForTray, createTroopView, deploymentDescription, hasDeploymentTarget, permanentUpgradeBonus, trayRoleLabel } from '../dist/client/troop-view.js';
-import { troopSeeds } from '../dist/game/cards.js';
+import { boardDescriptionEntries, cardRuleDetails, compareTroopsForTray, createTroopView, deploymentDescription, fullEffectLines, hasDeploymentTarget, isMagicShieldSummaryText, permanentUpgradeBonus, serverCardDetails, trayRoleLabel } from '../dist/client/troop-view.js';
+import { hasPassive, troopSeeds } from '../dist/game/cards.js';
 
 const catalogue = new Map(troopSeeds.map(card => [card.id, card]));
 const eightCardDeck = [
@@ -26,14 +26,41 @@ test('Control X is shown in compact and hover card rules', () => {
   assert.ok(cardRuleDetails(troop).includes('Control 2: this unit contributes 2 additional control to its current region.'));
 });
 
+test('Fly cards and temples omit redundant Move 0 compact text', () => {
+  assert.equal(fullEffectLines(createTroopView('raven-prince', 1)).includes('0 🥾'), false);
+  assert.equal(fullEffectLines(createTroopView('spring-temple', 1)).includes('0 🥾'), false);
+  assert.equal(fullEffectLines(createTroopView('cave-viper', 1)).includes('0 🥾'), true, 'an immobile non-Fly troop still explains Move 0');
+  assert.equal(boardDescriptionEntries(createTroopView('raven-prince', 1)).some(line => line.text === '🥾 0'), false);
+  assert.equal(boardDescriptionEntries(createTroopView('spring-temple', 1)).some(line => line.text === '🥾 0'), false);
+});
+
+test('side-card summaries include card-level self defense capabilities', () => {
+  assert.ok(serverCardDetails(createTroopView('obsidian-lizard', 1)).includes('2 🛡️'));
+  const komodo = serverCardDetails(createTroopView('komodo-dragon', 1));
+  assert.ok(komodo.includes('3 🛡️'), 'the physical self-defense shield is shown on the side card');
+  assert.ok(komodo.includes('~3 🛡️~'), 'the matching magic self-defense shield is a distinct purple-marked line');
+  assert.equal(isMagicShieldSummaryText(createTroopView('komodo-dragon', 1), '3 🛡️'), false, 'the equal-valued physical line stays a normal shield');
+  assert.equal(isMagicShieldSummaryText(createTroopView('komodo-dragon', 1), '~3 🛡️~'), true, 'the marked line renders as the purple magic shield');
+  const obsidian = boardDescriptionEntries(createTroopView('obsidian-lizard', 1), true);
+  assert.ok(obsidian.some(line => line.text === '2 🛡️' && line.action === 'self-defense'));
+  assert.equal(obsidian.some(line => line.text === '0 🛡️' && line.action === 'self-magic-defense'), false, 'a self-defense preview never adds a zero magic shield to troops without magic defense');
+});
+
+test('board trigger rows identify their magic modifier component', () => {
+  const deploy = boardDescriptionEntries(createTroopView('duelist-scorpion', 1)).find(line => line.text === 'Deploy: +3 ~+3~');
+  assert.equal(deploy?.magicModifier, true);
+  const physicalOnly = boardDescriptionEntries(createTroopView('thunder-toad', 1)).find(line => line.text === 'Stun: +1');
+  assert.equal(physicalOnly?.magicModifier, false);
+});
+
 test('board hex information always uses three rows and marks overflow on the third', () => {
   const short = boardDescriptionEntries(createTroopView('ember-salamander', 1));
-  assert.equal(short.length, 3);
+  assert.equal(short.length, 4);
 
-  const overflowing = boardDescriptionEntries(createTroopView('wandering-monarch', 1));
-  assert.equal(overflowing.length, 3);
-  assert.match(overflowing[2].text, / \.\.\.$/u);
-  assert.notEqual(overflowing[2].text, '...');
+  const overflowing = boardDescriptionEntries({ ...createTroopView('wandering-monarch', 1), control: 2 });
+  assert.equal(overflowing.length, 4);
+  assert.match(overflowing[3].text, / \.\.\.$/u);
+  assert.notEqual(overflowing[3].text, '...');
 });
 
 test('adding cards rejects duplicates, unknown cards, and a second hero', () => {
@@ -111,7 +138,7 @@ test('special deployment rules are explained in plain language', () => {
   ]);
   assert.deepEqual(cardRuleDetails(caveViper), [
     'Front line once you control it.',
-    '2🔥3 (magic): 2 damage at distance 3; resolves after the opponent acts, ignores shields, and kills only if lethal.',
+    '2🔥3 (magic): 2 damage at distance 3; resolves after the opponent acts, ignores shields, and kills only if lethal. Fire magic lights inert bombs; instant fire detonates them immediately.',
     'Movement: this unit cannot move.'
   ]);
 });
@@ -189,8 +216,21 @@ test('hover rules pair every action notation with a plain-language explanation',
     '3🏹4 (ranged attack): 3 physical damage at distance 4; resolves after the opponent acts and shields can block it.'
   ));
   assert.ok(cardRuleDetails(createTroopView('ember-salamander', 1)).includes(
-    '3🔥2 (magic): 3 damage at distance 2; resolves after the opponent acts, ignores shields, and kills only if lethal.'
+    '3🔥2 (magic): 3 damage at distance 2; resolves after the opponent acts, ignores shields, and kills only if lethal. Fire magic lights inert bombs; instant fire detonates them immediately.'
   ));
+});
+
+test('static passives drive both gameplay lookup and generated card descriptions', () => {
+  const titanium = createTroopView('iron-bell-golem', 1);
+  const obsidian = createTroopView('obsidian-lizard', 1);
+  const steady = createTroopView('canyon-hawk', 1);
+  assert.ok(hasPassive(catalogue.get('iron-bell-golem'), 'titanium'));
+  assert.ok(fullEffectLines(titanium).includes('Titanium'));
+  assert.ok(cardRuleDetails(titanium).includes('Titanium: immune to physical Attack and Gore damage.'));
+  assert.ok(fullEffectLines(obsidian).includes('Obsidian'));
+  assert.ok(cardRuleDetails(obsidian).includes('Obsidian: immune to magic damage sources.'));
+  assert.ok(fullEffectLines(steady).includes('Steady'));
+  assert.ok(cardRuleDetails(steady).includes('Steady: its opponent has 0 combat modifier while this unit is in a bash.'));
 });
 
 test('Sahel Porcupine exposes accumulated event bonuses as magenta board and hover upgrades', () => {
@@ -200,6 +240,6 @@ test('Sahel Porcupine exposes accumulated event bonuses as magenta board and hov
   });
   assert.deepEqual(permanentUpgradeBonus(porcupine, 'attack'), { left: 2, right: 2 });
   const rangedLine = boardDescriptionEntries(porcupine).find(line => line.action === 'attack');
-  assert.deepEqual(rangedLine, { text: '3 🏹 3 ...', action: 'attack', upgraded: false, staticLeft: true, staticRight: true });
+  assert.deepEqual(rangedLine, { text: '3 🏹 3', action: 'attack', upgraded: false, staticLeft: true, staticRight: true });
   assert.ok(cardRuleDetails(porcupine).some(rule => rule.startsWith('3🏹3 (ranged attack):')));
 });

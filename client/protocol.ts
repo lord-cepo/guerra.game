@@ -50,6 +50,7 @@ export interface ServerEffectState {
   value: number;
   pierce?: boolean;
   origin?: Coordinate;
+  goreDestination?: Coordinate;
 }
 
 export interface ServerBashState {
@@ -72,6 +73,7 @@ export interface ServerGameEvent {
 
 export interface ServerTriggerEvent {
   trigger: string;
+  actionKind?: string;
   player: Player;
   hex?: Coordinate;
   troopIds: string[];
@@ -112,7 +114,7 @@ export interface ServerMatchState {
   units: ServerUnitState[];
   defeatedTroopIds: string[];
   effects: ServerEffectState[];
-  bombs?: Array<{ owner: Player; sourceTroopId: string; coordinate: Coordinate; damage: number }>;
+  bombs?: Array<{ owner: Player; sourceTroopId: string; coordinate: Coordinate; damage: number; pierce?: boolean }>;
   bashes: ServerBashState[];
   pendingResolution?: PendingResolution;
   dashboard: StackAction[];

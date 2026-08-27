@@ -1,4 +1,4 @@
-import { type CardAction, type EventCondition, type LegacyActionView, type TriggerDefinition, type TroopAction, type TroopSeed, type UpgradableAbility } from './cards.js';
+import { hasPassive, type CardAction, type EventCondition, type LegacyActionView, type TriggerDefinition, type TroopAction, type TroopSeed, type UpgradableAbility } from './cards.js';
 import { adjacentCoordinates, hexDistance, isBoardCoordinate, PLAYABLE_COORDINATES, regionAt, straightLine, type Coordinate } from './board.js';
 import type { Player } from './types.js';
 
@@ -38,8 +38,8 @@ export type TurnPhase = 'start' | 'action' | 'action-resolve' | 'combat-resolve'
 export interface Upgrade { ability: UpgradableAbility; left?: number; right?: number; sourceUnitId: UnitId; }
 export interface Shield { value: number; sourceUnitId?: UnitId; }
 export interface UnitState { id?: UnitId; troopId: string; owner: Player; coordinate: Coordinate; permanentDamage: number; rangedDamageBonus?: number; rangedRangeBonus?: number; combatModifierBonus?: number; bashModifierBonus?: number; magicModifierBonus?: number; stunnedTurns?: number; upgrades?: Upgrade[]; shields?: Shield[]; }
-export interface Effect { owner: Player; sourceTroopId: string; sourceUnitId?: UnitId; targetUnitId?: UnitId; kind: 'attack' | 'cannon' | 'gore' | 'bomb' | 'magic' | 'stun'; target: Coordinate; value: number; /** Pierce attacks ignore the target's physical modifier. */ pierce?: boolean; /** Source coordinate for a moving delayed action, or center of a bomb area effect. */ origin?: Coordinate; }
-export interface Bomb { owner: Player; sourceTroopId: string; coordinate: Coordinate; damage: number; }
+export interface Effect { owner: Player; sourceTroopId: string; sourceUnitId?: UnitId; targetUnitId?: UnitId; kind: 'attack' | 'cannon' | 'gore' | 'bomb' | 'magic' | 'stun'; target: Coordinate; value: number; /** Pierce attacks ignore the target's physical modifier. */ pierce?: boolean; /** Source coordinate for a moving delayed action, or center of a bomb area effect. */ origin?: Coordinate; /** Final landing coordinate shared by every effect in a delayed Gore charge. */ goreDestination?: Coordinate; }
+export interface Bomb { owner: Player; sourceTroopId: string; coordinate: Coordinate; damage: number; pierce?: boolean; }
 interface Bash { attackerId: string; defenderId: string; target: Coordinate; }
 export interface GameEvent { revision: number; player: Player; action: GameAction; /** Hex vacated by the completed move, flight, or push. */ origin?: Coordinate; }
 export type Trigger = EventCondition;
@@ -54,6 +54,8 @@ export interface TriggerEvent {
   attackerId?: UnitId;
   defenderId?: UnitId;
   targetUnitId?: UnitId;
+  /** Action kind that produced a delayed event after another action became current. */
+  actionKind?: CardAction['kind'];
   firstStrike?: {
     unitId: UnitId;
     targetId: UnitId;
@@ -84,11 +86,11 @@ export type PendingResolution = (
   | { owner: Player; turnPlayer: Player; sourceUnitId: UnitId; sourceTroopId: string; kind: 'optional-move'; distance: number }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'death-attack'; origin: Coordinate; damage: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'instant-ranged'; origin: Coordinate; damage: number; range: number; remaining: number; optional?: boolean }
-  | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'instant-magic'; origin: Coordinate; damage: number; range: number }
+  | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'instant-magic'; origin: Coordinate; damage: number; range: number; pierce?: boolean }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'stun'; origin: Coordinate; turns: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceUnitId: UnitId; sourceTroopId: string; kind: 'trigger-pull'; distance: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'revive' }
-) & { stackActionId?: number };
+) & { stackActionId?: number; /** Start-trigger choices resume the same player's normal action phase. */ resumeTurn?: boolean };
 export interface GameState { activePlayer: Player; phase?: TurnPhase; winner?: Player; units: UnitState[]; effects: Effect[]; bashes: Bash[]; bombs?: Bomb[]; pendingResolution?: PendingResolution; pendingResolutionQueue?: PendingResolution[]; lastActingTroopId?: Partial<Record<Player, string>>; defeatedTroopIds?: string[]; revision?: number; events?: GameEvent[]; triggerEvents?: TriggerEvent[]; dashboard?: StackAction[]; resolutionStack?: number[]; currentEventId?: number; nextDashboardId?: number; deckOrder?: Partial<Record<Player, string[]>>; }
 
 export function createGameState(deckOrder?: Partial<Record<Player, string[]>>): GameState { return { activePlayer: 1, phase: 'action', units: [], effects: [], bashes: [], bombs: [], lastActingTroopId: {}, defeatedTroopIds: [], revision: 0, events: [], triggerEvents: [], dashboard: [], resolutionStack: [], nextDashboardId: 1, ...(deckOrder ? { deckOrder: structuredClone(deckOrder) } : {}) }; }
@@ -232,10 +234,26 @@ function cannonDamage(troop: TroopSeed, unit: UnitState): number { return (actio
 function goreDamage(troop: TroopSeed, unit: UnitState): number { return (actionOfType(troop, 'gore')?.amount ?? 0) + upgradeBonus(unit, 'gore').left; }
 function bombDamage(troop: TroopSeed, unit: UnitState): number { return (actionOfType(troop, 'bomb')?.amount ?? 0) + upgradeBonus(unit, 'bomb').left; }
 
-function igniteBomb(state: GameState, bomb: Bomb, owner: Player): void {
+function igniteBomb(state: GameState, bomb: Bomb, owner: Player, pierce = false): void {
   state.bombs = state.bombs?.filter(item => item !== bomb);
   for (const target of [bomb.coordinate, ...adjacentCoordinates(bomb.coordinate)].filter(isBoardCoordinate)) {
-    state.effects.push({ owner, sourceTroopId: bomb.sourceTroopId, kind: 'bomb', target, value: bomb.damage, origin: bomb.coordinate });
+    state.effects.push({ owner, sourceTroopId: bomb.sourceTroopId, kind: 'bomb', target, value: bomb.damage, origin: bomb.coordinate, ...(pierce ? { pierce: true } : {}) });
+  }
+}
+
+/** Instant fire magic detonates the bomb immediately instead of leaving it lit. */
+function explodeBombNow(state: GameState, bomb: Bomb, owner: Player, pierce: boolean, cards: ReadonlyMap<string, TroopSeed>): void {
+  state.bombs = state.bombs?.filter(item => item !== bomb);
+  for (const target of [bomb.coordinate, ...adjacentCoordinates(bomb.coordinate)].filter(isBoardCoordinate)) {
+    const chainedBomb = state.bombs?.find(item => item.coordinate === target);
+    if (chainedBomb) igniteBomb(state, chainedBomb, owner, pierce);
+    for (const unit of state.units.filter(item => item.coordinate === target)) {
+      if (!pierce && hasPassive(cards.get(unit.troopId), 'obsidian')) continue;
+      const damage = pierce ? bomb.damage : Math.max(0, bomb.damage - (unit.magicModifierBonus ?? 0));
+      unit.magicModifierBonus = undefined;
+      unit.permanentDamage += damage;
+      if (health(unit, cards) === 0) remove(state, unit, cards);
+    }
   }
 }
 function shieldValue(unit: UnitState): number { return (unit.shields ?? []).reduce((sum, shield) => sum + shield.value, 0); }
@@ -271,11 +289,10 @@ function pushLine(from: Coordinate, target: Coordinate, maxDistance: number): Co
 }
 function pullLine(from: Coordinate, target: Coordinate, maxDistance: number): Coordinate[] | undefined {
   const [fromX, fromY] = from.split(',').map(Number); const [targetX, targetY] = target.split(',').map(Number);
-  const dx = fromX - targetX; const dy = fromY - targetY; const available = hexDistance(from, target) - 1;
-  if (available < 1 || !(dx === 0 || dy === 0 || dx === dy)) return undefined;
+  const dx = fromX - targetX; const dy = fromY - targetY;
+  if (maxDistance < 1 || !(dx === 0 || dy === 0 || dx === dy)) return undefined;
   const stepX = dx === 0 ? 0 : dx / Math.abs(dx); const stepY = dy === 0 ? 0 : dy / Math.abs(dy);
-  const distance = Math.min(maxDistance, available);
-  const line = Array.from({ length: distance }, (_, index) => `${targetX + stepX * (index + 1)},${targetY + stepY * (index + 1)}` as Coordinate);
+  const line = Array.from({ length: maxDistance }, (_, index) => `${targetX + stepX * (index + 1)},${targetY + stepY * (index + 1)}` as Coordinate);
   return isBoardCoordinate(line.at(-1)) ? line : undefined;
 }
 function displacementLine(type: 'push' | 'pull', from: Coordinate, target: Coordinate, maxDistance: number): Coordinate[] | undefined {
@@ -337,7 +354,7 @@ function modifierEntries(state: GameState, unit: UnitState, cards: ReadonlyMap<s
   // defends.
   if (bash) {
     const opponentId = bash.attackerId === unitId(unit) ? bash.defenderId : bash.attackerId;
-    if (findUnit(state, opponentId)?.troopId === 'canyon-hawk') return [];
+    if (hasPassive(cards.get(findUnit(state, opponentId)?.troopId ?? ''), 'steady')) return [];
   }
   const entries: ModifierEntry[] = [];
   if (block) entries.push({ label: 'Shield', value: block });
@@ -360,8 +377,37 @@ function modifierEntries(state: GameState, unit: UnitState, cards: ReadonlyMap<s
 }
 function modifier(state: GameState, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>, virtual?: UnitState): number { return modifierEntries(state, unit, cards, virtual).reduce((sum, entry) => sum + entry.value, 0); }
 function enqueueResolution(state: GameState, resolution: PendingResolution): void {
+  if (state.phase === 'start') resolution.resumeTurn = true;
   if (!state.pendingResolution) state.pendingResolution = resolution;
   else (state.pendingResolutionQueue ??= []).push(resolution);
+}
+
+function pendingResumesTurn(state: GameState, pending: PendingResolution): boolean {
+  return pending.resumeTurn === true
+    || Boolean(pending.stackActionId && state.dashboard?.find(row => row.id === pending.stackActionId)?.phase === 'start');
+}
+
+function optionalMoveTargets(state: GameState, source: UnitState, distance: number): Coordinate[] {
+  return PLAYABLE_COORDINATES.filter(coordinate => {
+    if (hexDistance(source.coordinate, coordinate) > distance || state.bashes.some(bash => bash.target === coordinate)) return false;
+    if (at(state, coordinate)?.owner === source.owner) return false;
+    return hasFreePath(state, source.coordinate, coordinate, distance);
+  });
+}
+
+function stunTargets(state: GameState, owner: Player, origin: Coordinate, range: number): UnitState[] {
+  return state.units.filter(unit => unit.owner !== owner && hexDistance(origin, unit.coordinate) <= range);
+}
+
+function pullTargets(state: GameState, source: UnitState, distance: number, range: number): Array<{ target: UnitState; destination: Coordinate }> {
+  const targets: Array<{ target: UnitState; destination: Coordinate }> = [];
+  for (const target of stunTargets(state, source.owner, source.coordinate, range)) {
+    const line = displacementLine('pull', source.coordinate, target.coordinate, distance);
+    const destination = line?.at(-1);
+    if (!destination || state.bashes.some(bash => bash.target === destination) || at(state, destination)?.owner === target.owner) continue;
+    targets.push({ target, destination });
+  }
+  return targets;
 }
 
 function remove(state: GameState, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): void {
@@ -392,7 +438,10 @@ const customEventHandlers: Partial<Record<Trigger, Partial<Record<string, Passiv
 
 function triggerMatches(trigger: TriggerDefinition, unit: UnitState, event: TriggerEvent, activeAction?: CardAction): boolean {
   if (trigger.condition.signal && trigger.condition.signal !== event.trigger) return false;
-  if (trigger.condition.kind && trigger.condition.kind !== activeAction?.kind) return false;
+  if (trigger.condition.kind === 'phase' && !['start', 'end', 'opponentStart', 'opponentEnd'].includes(event.trigger)) return false;
+  if (trigger.condition.kind === 'phase' && trigger.condition.type?.includes('start') && event.trigger !== 'start') return false;
+  if (trigger.condition.kind === 'phase' && trigger.condition.type?.includes('end') && event.trigger !== 'end') return false;
+  if (trigger.condition.kind && trigger.condition.kind !== (event.actionKind ?? activeAction?.kind)) return false;
   if (trigger.condition.type?.some(type => !activeAction?.type?.includes(type))) return false;
   if (trigger.condition.subject !== 'self') return true;
   if (event.trigger === 'start' || event.trigger === 'end' || event.trigger === 'opponentStart' || event.trigger === 'opponentEnd') return true;
@@ -423,7 +472,7 @@ function resolveTriggeredAction(state: GameState, unit: UnitState, event: Trigge
       row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, remaining: amount(action, 1) ?? 1, ...(action.type.includes('optional') ? { optional: true } : {}), stackActionId: row.id });
     }
     else if (action.kind === 'fire' && action.type?.includes('instant') && event.player === unit.owner) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'instant-magic', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'instant-magic', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, ...(action.type.includes('pierce') ? { pierce: true } : {}), stackActionId: row.id });
     }
     else if (action.kind === 'stun' && event.targetUnitId && event.player === unit.owner) {
       const target = findUnit(state, event.targetUnitId);
@@ -434,12 +483,16 @@ function resolveTriggeredAction(state: GameState, unit: UnitState, event: Trigge
       }
     }
     else if (action.kind === 'stun' && event.player === unit.owner) {
-      row.status = 'waiting-input';
-      enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'stun', origin: unit.coordinate, turns: amount(action) ?? 0, range: action.range, stackActionId: row.id });
+      if (stunTargets(state, unit.owner, unit.coordinate, action.range).length) {
+        row.status = 'waiting-input';
+        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'stun', origin: unit.coordinate, turns: amount(action) ?? 0, range: action.range, stackActionId: row.id });
+      }
     }
     else if (action.kind === 'pull' && event.player === unit.owner) {
-      row.status = 'waiting-input';
-      enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'trigger-pull', distance: amount(action) ?? 0, range: action.range, stackActionId: row.id });
+      if (pullTargets(state, unit, amount(action) ?? 0, action.range).length) {
+        row.status = 'waiting-input';
+        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'trigger-pull', distance: amount(action) ?? 0, range: action.range, stackActionId: row.id });
+      }
     }
     else if (action.kind === 'defense' && action.type?.includes('adjacent') && event.player === unit.owner) {
       for (const coordinate of adjacentCoordinates(unit.coordinate)) {
@@ -448,8 +501,12 @@ function resolveTriggeredAction(state: GameState, unit: UnitState, event: Trigge
         addShield(ally, amount(action) ?? 0, unitId(unit));
       }
     }
-    else if (action.kind === 'move' && action.type?.includes('optional') && event.player === unit.owner) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'optional-move', distance: action.range, stackActionId: row.id });
+    // Triggered moves are always optional (declinable) unless a future type
+    // qualifier marks them mandatory. The pending choice owns the Skip action.
+    else if (action.kind === 'move' && event.player === unit.owner) {
+      if (optionalMoveTargets(state, unit, action.range).length) {
+        row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'optional-move', distance: action.range, stackActionId: row.id });
+      }
     }
 }
 
@@ -512,40 +569,29 @@ export function availableActionsFor(state: GameState, player: Player, troopId: s
   if (state.pendingResolution) {
     const pending = state.pendingResolution;
     if (pending.owner !== player || pending.sourceTroopId !== troopId) return [];
-    const choices: GameAction[] = [];
+    const choices: GameAction[] = [{ type: 'resolve-pass', troopId }];
     if (pending.kind === 'optional-move') {
-      choices.push({ type: 'resolve-pass', troopId });
-      const source = findUnit(state, pending.sourceUnitId); if (!source) return [];
-      for (const coordinate of PLAYABLE_COORDINATES) {
-        if (hexDistance(source.coordinate, coordinate) > pending.distance || state.bashes.some(bash => bash.target === coordinate)) continue;
-        const occupant = at(state, coordinate);
-        if (occupant?.owner === player) continue;
-        if (hasFreePath(state, source.coordinate, coordinate, pending.distance)) choices.push({ type: 'resolve-move', troopId, coordinate });
-      }
+      const source = findUnit(state, pending.sourceUnitId); if (!source) return choices;
+      for (const coordinate of optionalMoveTargets(state, source, pending.distance)) choices.push({ type: 'resolve-move', troopId, coordinate });
     } else if (pending.kind === 'death-attack') {
       for (const target of state.units.filter(unit => unit.owner !== player && hexDistance(pending.origin, unit.coordinate) <= pending.range)) {
         choices.push({ type: 'resolve-death-attack', troopId, coordinate: target.coordinate, targetUnitId: unitId(target) });
       }
     } else if (pending.kind === 'instant-ranged') {
       for (const coordinate of PLAYABLE_COORDINATES.filter(coordinate => hexDistance(pending.origin, coordinate) <= pending.range)) choices.push({ type: 'resolve-instant-ranged', troopId, coordinate });
-      if (pending.optional) choices.push({ type: 'resolve-pass', troopId });
     } else if (pending.kind === 'instant-magic') {
       for (const coordinate of PLAYABLE_COORDINATES.filter(coordinate => hexDistance(pending.origin, coordinate) <= pending.range)) choices.push({ type: 'resolve-instant-magic', troopId, coordinate });
     } else if (pending.kind === 'stun') {
-      for (const target of state.units.filter(unit => unit.owner !== player && hexDistance(pending.origin, unit.coordinate) <= pending.range)) choices.push({ type: 'resolve-stun', troopId, coordinate: target.coordinate, targetUnitId: unitId(target) });
+      for (const target of stunTargets(state, player, pending.origin, pending.range)) choices.push({ type: 'resolve-stun', troopId, coordinate: target.coordinate, targetUnitId: unitId(target) });
     } else if (pending.kind === 'trigger-pull') {
       const source = findUnit(state, pending.sourceUnitId);
-      if (source) for (const target of state.units.filter(unit => unit.owner !== player && hexDistance(source.coordinate, unit.coordinate) <= pending.range)) {
-        const line = displacementLine('pull', source.coordinate, target.coordinate, pending.distance);
-        if (line) choices.push({ type: 'resolve-pull', troopId, coordinate: target.coordinate, destination: line.at(-1)!, targetUnitId: unitId(target) });
-      }
+      if (source) for (const { target, destination } of pullTargets(state, source, pending.distance, pending.range)) choices.push({ type: 'resolve-pull', troopId, coordinate: target.coordinate, destination, targetUnitId: unitId(target) });
     } else {
       for (const defeatedId of state.defeatedTroopIds ?? []) {
         const targetTroopId = defeatedId.split(':').slice(1).join(':');
         if (targetTroopId !== pending.sourceTroopId && defeatedId.startsWith(`${player}:`) && cards.get(targetTroopId)?.role !== 'hero') choices.push({ type: 'resolve-revive', troopId, targetTroopId });
       }
     }
-    if (choices.length === 0) choices.push({ type: 'resolve-pass', troopId });
     return choices;
   }
   const troop = cards.get(troopId);
@@ -617,19 +663,6 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
   if (state.pendingResolution) {
     const pending = state.pendingResolution;
     if (pending.owner !== player || !('troopId' in action) || action.troopId !== pending.sourceTroopId || !['resolve-move', 'resolve-death-attack', 'resolve-instant-ranged', 'resolve-instant-magic', 'resolve-stun', 'resolve-pull', 'resolve-revive', 'resolve-pass'].includes(action.type)) throw new Error('Resolve the pending event action first.');
-    if (action.type === 'resolve-pass') {
-      const mayPass = pending.kind === 'optional-move'
-        || pending.kind === 'instant-ranged' && pending.optional === true
-        || pending.kind === 'instant-magic' && !state.units.some(unit => unit.owner !== player && hexDistance(pending.origin, unit.coordinate) <= pending.range)
-        || pending.kind === 'death-attack' && !state.units.some(unit => unit.owner !== player && hexDistance(pending.origin, unit.coordinate) <= pending.range)
-        || pending.kind === 'stun' && !state.units.some(unit => unit.owner !== player && hexDistance(pending.origin, unit.coordinate) <= pending.range)
-        || pending.kind === 'trigger-pull' && !state.units.some(unit => unit.owner !== player && (() => { const source = findUnit(state, pending.sourceUnitId); return !!source && hexDistance(source.coordinate, unit.coordinate) <= pending.range && !!displacementLine('pull', source.coordinate, unit.coordinate, pending.distance); })())
-        || pending.kind === 'revive' && !(state.defeatedTroopIds ?? []).some(id => {
-          const targetTroopId = id.split(':').slice(1).join(':');
-          return targetTroopId !== pending.sourceTroopId && id.startsWith(`${player}:`) && cards.get(targetTroopId)?.role !== 'hero';
-        });
-      if (!mayPass) throw new Error('This event action is mandatory.');
-    }
     let origin: Coordinate | undefined;
     if (pending.kind === 'optional-move' && action.type === 'resolve-move') {
       const unit = findUnit(state, pending.sourceUnitId); if (!unit) throw new Error('Event source is no longer available.');
@@ -671,13 +704,19 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       target.combatModifierBonus = undefined;
       target.bashModifierBonus = undefined;
       state.effects.push({ owner: player, sourceTroopId: pending.sourceTroopId, targetUnitId: unitId(target), kind: 'stun', target: action.coordinate, value: pending.turns });
+      dispatchTrigger(state, { trigger: 'stunUsed', player, hex: action.coordinate, troopIds: [`${player}:${pending.sourceTroopId}` as UnitId, unitId(target)], actingTroopId: pending.sourceTroopId, targetUnitId: unitId(target) }, cards, [player]);
     } else if (pending.kind === 'instant-magic' && action.type === 'resolve-instant-magic') {
       if (!isBoardCoordinate(action.coordinate) || hexDistance(pending.origin, action.coordinate) > pending.range) throw new Error('Instant magic target is invalid.');
-      const target = at(state, action.coordinate);
-      if (target && target.owner !== player && !cards.get(target.troopId)?.obsidian) {
-        const lethalThreshold = pending.damage - (target.magicModifierBonus ?? 0);
-        target.magicModifierBonus = undefined;
-        if (health(target, cards) <= lethalThreshold) remove(state, target, cards);
+      const bomb = state.bombs?.find(item => item.coordinate === action.coordinate);
+      if (bomb) explodeBombNow(state, bomb, player, pending.pierce ?? false, cards);
+      else {
+        const target = at(state, action.coordinate);
+        const pierceMagic = pending.pierce ?? false;
+        if (target && target.owner !== player && (pierceMagic || !hasPassive(cards.get(target.troopId), 'obsidian'))) {
+          const lethalThreshold = pending.damage - (pierceMagic ? 0 : (target.magicModifierBonus ?? 0));
+          target.magicModifierBonus = undefined;
+          if (health(target, cards) <= lethalThreshold) remove(state, target, cards);
+        }
       }
     } else if (pending.kind === 'trigger-pull' && action.type === 'resolve-pull') {
       const source = findUnit(state, pending.sourceUnitId);
@@ -709,6 +748,11 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     state.events ??= [];
     state.events.push({ revision: state.revision, player, action: structuredClone(action), ...(origin ? { origin } : {}) });
     if (state.pendingResolution) return state;
+    if (pendingResumesTurn(state, pending)) {
+      finishOpenStack(state);
+      completePhase(state, 'action', cards);
+      return state;
+    }
     state.phase = 'end';
     const turnPlayer = pending.turnPlayer;
     const opponentOfTurnPlayer = turnPlayer === 1 ? 2 : 1;
@@ -800,21 +844,23 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     } else if (action.type === 'gore') {
       const maximumRange = actionRange(state, troop, unit, cards, 'gore');
       const line = straightLine(unit.coordinate, action.coordinate, maximumRange);
-      if (!line || !hasFreePath(state, unit.coordinate, action.coordinate, maximumRange)) throw new Error('Gore destination has no free path.');
+      // Gore is a straight-line leap: intervening troops do not block it.
+      // Only alignment, range, and the final destination constrain the action.
+      if (!line) throw new Error('Gore destination is out of range or not aligned.');
       if (state.bashes.some(bash => bash.target === action.coordinate)) throw new Error('A bash is already happening on this hex.');
       const target = at(state, action.coordinate);
       if (target?.owner === player) throw new Error('A friendly troop occupies this hex.');
       vacatedCoordinate = unit.coordinate;
-      unit.coordinate = action.coordinate;
-      if (target) {
-        const attackerId = unitId(unit); const defenderId = unitId(target);
-        state.bashes.push({ attackerId, defenderId, target: action.coordinate });
-        const bashEvent: TriggerEvent = { trigger: 'bash', player, hex: action.coordinate, troopIds: [attackerId, defenderId], actingTroopId: action.troopId, attackerId, defenderId };
-        dispatchTrigger(state, { ...bashEvent, trigger: 'bashAttack' }, cards, [player]);
-        dispatchTrigger(state, { ...bashEvent, trigger: 'bashDefense' }, cards, [target.owner]);
-        dispatchTrigger(state, bashEvent, cards, [player, target.owner]);
-        state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: attackerId, targetUnitId: defenderId, kind: 'gore', target: action.coordinate, value: goreDamage(troop, unit), origin: vacatedCoordinate });
-      }
+      const attackerId = unitId(unit);
+      const enemiesInPath = line.map(coordinate => at(state, coordinate)).filter((candidate): candidate is UnitState => Boolean(candidate && candidate.owner !== player));
+      // A zero-damage marker keeps an empty charge pending and records its
+      // landing hex. Enemy-specific effects snapshot every troop in the line.
+      state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: attackerId, kind: 'gore', target: action.coordinate, value: 0, origin: vacatedCoordinate, goreDestination: action.coordinate });
+      for (const enemy of enemiesInPath) state.effects.push({
+        owner: player, sourceTroopId: action.troopId, sourceUnitId: attackerId,
+        targetUnitId: unitId(enemy), kind: 'gore', target: enemy.coordinate,
+        value: goreDamage(troop, unit), origin: vacatedCoordinate, goreDestination: action.coordinate,
+      });
     } else if (action.type === 'self-defense') {
       addShield(unit, (troop.selfDefense ?? 1) + upgradeBonus(unit, 'self-defense').left, unitId(unit));
     } else if (action.type === 'self-magic-defense') {
@@ -834,6 +880,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
         vacatedCoordinate = pushedBomb.coordinate;
         if (landingBomb) {
           landingBomb.damage += pushedBomb.damage;
+          if (pushedBomb.pierce) landingBomb.pierce = true;
           state.bombs = state.bombs.filter(bomb => bomb !== pushedBomb);
         } else pushedBomb.coordinate = action.destination;
       } else {
@@ -870,8 +917,10 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
         }
       } else if (action.type === 'bomb') {
         state.bombs ??= [];
-        if (state.bombs.some(bomb => bomb.coordinate === action.coordinate)) throw new Error('A bomb already occupies this hex.');
-        state.bombs.push({ owner: player, sourceTroopId: action.troopId, coordinate: action.coordinate, damage: bombDamage(troop, unit) });
+        const landingBomb = state.bombs.find(bomb => bomb.coordinate === action.coordinate);
+        const thrownPierce = Boolean(actionOfType(troop, 'bomb')?.qualifiers?.includes('pierce'));
+        if (landingBomb) { landingBomb.damage += bombDamage(troop, unit); if (thrownPierce) landingBomb.pierce = true; }
+        else state.bombs.push({ owner: player, sourceTroopId: action.troopId, coordinate: action.coordinate, damage: bombDamage(troop, unit), ...(thrownPierce ? { pierce: true } : {}) });
       } else {
       if (action.type === 'defense' || action.type === 'magic-defense') {
         const target = state.units.find(candidate => candidate.owner === player && candidate.coordinate === action.coordinate);
@@ -881,11 +930,11 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       } else if (action.type === 'attack') {
         const printedAttack = actionOfType(troop, 'attack');
         if (printedAttack?.qualifiers?.includes('instant')) {
-          if (offensiveTarget && offensiveTarget.owner !== player && !cards.get(offensiveTarget.troopId)?.titanium) {
+          if (offensiveTarget && offensiveTarget.owner !== player && !hasPassive(cards.get(offensiveTarget.troopId), 'titanium')) {
             const damage = Math.max(0, attackDamage(state, troop, unit, cards) - (printedAttack.qualifiers.includes('pierce') ? 0 : modifier(state, offensiveTarget, cards)));
             offensiveTarget.permanentDamage += damage;
             clearShield(offensiveTarget);
-            if (damage > 0) dispatchTrigger(state, { trigger: 'successfulAttack', player, hex: action.coordinate, troopIds: [unitId(unit), unitId(offensiveTarget)], actingTroopId: unit.troopId, targetUnitId: unitId(offensiveTarget) }, cards, [player]);
+            if (damage > 0) dispatchTrigger(state, { trigger: 'successfulAttack', player, hex: action.coordinate, troopIds: [unitId(unit), unitId(offensiveTarget)], actingTroopId: unit.troopId, targetUnitId: unitId(offensiveTarget), actionKind: 'ranged' }, cards, [player]);
             if (health(offensiveTarget, cards) === 0) remove(state, offensiveTarget, cards);
           }
         } else state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: unitId(unit), ...(offensiveTarget ? { targetUnitId: unitId(offensiveTarget) } : {}), kind: 'attack', target: action.coordinate, value: attackDamage(state, troop, unit, cards), ...(printedAttack?.qualifiers?.includes('pierce') ? { pierce: true } : {}) });
@@ -907,15 +956,18 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
         if (!targetAction || !useful) throw new Error('This upgrade cannot affect the selected ability.');
         target.upgrades.push({ ability: action.ability, left: upgrade?.left, right: upgrade?.right, sourceUnitId: unitId(unit) });
       } else if (action.type === 'magic') {
+        const magicAction = actionOfType(troop, 'magic');
         const bomb = state.bombs?.find(item => item.coordinate === action.coordinate);
-        if (bomb) igniteBomb(state, bomb, player);
-        else if (actionOfType(troop, 'magic')?.qualifiers?.includes('instant')) {
-          if (offensiveTarget && offensiveTarget.owner !== player && !cards.get(offensiveTarget.troopId)?.obsidian) {
-            const lethalThreshold = effectValue(state, troop, cards, unit) - (offensiveTarget.magicModifierBonus ?? 0);
+        if (bomb && magicAction?.qualifiers?.includes('instant')) explodeBombNow(state, bomb, player, Boolean(magicAction.qualifiers.includes('pierce')), cards);
+        else if (bomb) igniteBomb(state, bomb, player, Boolean(magicAction?.qualifiers?.includes('pierce')));
+        else if (magicAction?.qualifiers?.includes('instant')) {
+          const pierceMagic = magicAction.qualifiers.includes('pierce');
+          if (offensiveTarget && offensiveTarget.owner !== player && (pierceMagic || !hasPassive(cards.get(offensiveTarget.troopId), 'obsidian'))) {
+            const lethalThreshold = effectValue(state, troop, cards, unit) - (pierceMagic ? 0 : (offensiveTarget.magicModifierBonus ?? 0));
             offensiveTarget.magicModifierBonus = undefined;
             if (health(offensiveTarget, cards) <= lethalThreshold) remove(state, offensiveTarget, cards);
           }
-        } else state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: unitId(unit), ...(offensiveTarget ? { targetUnitId: unitId(offensiveTarget) } : {}), kind: 'magic', target: action.coordinate, value: effectValue(state, troop, cards, unit) });
+        } else state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: unitId(unit), ...(offensiveTarget ? { targetUnitId: unitId(offensiveTarget) } : {}), kind: 'magic', target: action.coordinate, value: effectValue(state, troop, cards, unit), ...(magicAction?.qualifiers?.includes('pierce') ? { pierce: true } : {}) });
       } else if (action.type === 'stun') {
         if (!offensiveTarget || offensiveTarget.owner === player) throw new Error('Stun must target an enemy troop.');
         const turns = actionOfType(troop, 'stun')?.amount ?? 0;
@@ -968,11 +1020,14 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
   const effectCoordinate = (unit: UnitState): Coordinate =>
     state.bashes.find(bash => bash.attackerId === unitId(unit))?.target ?? unit.coordinate;
   for (const effect of state.effects.filter(item => item.owner !== defender && (item.kind === 'attack' || item.kind === 'gore'))) {
+    if (effect.kind === 'gore' && effect.sourceUnitId && !findUnit(state, effect.sourceUnitId)) continue;
     if (effect.sourceUnitId) resolvedUpgradeSources.add(effect.sourceUnitId);
     const unit = effect.targetUnitId ? findUnit(state, effect.targetUnitId) : at(state, effect.target);
     if (effect.targetUnitId && unit && effectCoordinate(unit) !== effect.target) continue;
     if (unit && unit.owner === defender) {
-      if (cards.get(unit.troopId)?.titanium) { clearShield(unit); continue; }
+      // Titanium prevents the physical hit itself, so an existing shield is
+      // not contacted or consumed.
+      if (hasPassive(cards.get(unit.troopId), 'titanium')) continue;
       const damage = Math.max(0, effect.value - (effect.pierce ? 0 : modifier(state, unit, cards)));
       unit.permanentDamage += damage;
       // A physical ranged attack consumes the shield on the troop it actually
@@ -980,14 +1035,33 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
       clearShield(unit);
       if (damage > 0 && (effect.kind === 'attack' || effect.kind === 'gore') && effect.sourceUnitId) {
         const source = findUnit(state, effect.sourceUnitId);
-        if (source) dispatchTrigger(state, { trigger: 'successfulAttack', player: effect.owner, hex: effect.target, troopIds: [unitId(source), unitId(unit)], actingTroopId: source.troopId, targetUnitId: unitId(unit) }, cards, [effect.owner]);
+        if (source) dispatchTrigger(state, { trigger: 'successfulAttack', player: effect.owner, hex: effect.target, troopIds: [unitId(source), unitId(unit)], actingTroopId: source.troopId, targetUnitId: unitId(unit), actionKind: effect.kind === 'gore' ? 'gore' : 'ranged' }, cards, [effect.owner]);
       }
       if (health(unit, cards) === 0) remove(state, unit, cards);
     }
   }
-  // Black magic ignores modifiers and always causes permanent damage. Bomb
-  // explosions and cannon lines are neutral, so either player's troops can
-  // be caught on their affected hexes.
+  const resolvingGoreCharges = new Map<UnitId, Effect>();
+  for (const effect of state.effects.filter(item => item.owner !== defender && item.kind === 'gore' && item.sourceUnitId && item.goreDestination)) {
+    resolvingGoreCharges.set(effect.sourceUnitId!, effect);
+  }
+  for (const [sourceId, effect] of resolvingGoreCharges) {
+    const source = findUnit(state, sourceId);
+    const destination = effect.goreDestination;
+    if (!source || !destination) continue;
+    source.coordinate = destination;
+    const target = state.units.find(unit => unit !== source && unit.coordinate === destination);
+    if (!target || target.owner === source.owner || state.bashes.some(bash => bash.target === destination)) continue;
+    const attackerId = unitId(source); const defenderId = unitId(target);
+    state.bashes.push({ attackerId, defenderId, target: destination });
+    const bashEvent: TriggerEvent = { trigger: 'bash', player: source.owner, hex: destination, troopIds: [attackerId, defenderId], actingTroopId: source.troopId, attackerId, defenderId };
+    dispatchTrigger(state, { ...bashEvent, trigger: 'bashAttack' }, cards, [source.owner]);
+    dispatchTrigger(state, { ...bashEvent, trigger: 'bashDefense' }, cards, [target.owner]);
+    dispatchTrigger(state, bashEvent, cards, [source.owner, target.owner]);
+  }
+  // Cannon and Bomb are magic damage: the physical modifier is ignored, but
+  // the magic modifier reduces the blast and is consumed, and Obsidian blocks
+  // it unless the blast pierces. Bomb explosions and cannon lines are
+  // neutral, so either player's troops can be caught on their affected hexes.
   for (const effect of state.effects.filter(item => item.owner !== defender && (item.kind === 'cannon' || item.kind === 'bomb'))) {
     if (effect.sourceUnitId) resolvedUpgradeSources.add(effect.sourceUnitId);
     if (effect.kind === 'bomb') {
@@ -995,12 +1069,14 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
       // The current player's completed action caused this ignition. Giving
       // the fresh effects that player as owner makes them resolve after the
       // following player's action, never recursively in this same pass.
-      if (chainedBomb) igniteBomb(state, chainedBomb, defender);
+      if (chainedBomb) igniteBomb(state, chainedBomb, defender, Boolean(effect.pierce));
     }
     const targets = state.units.filter(unit => unit.coordinate === effect.target);
     for (const unit of targets) {
-      if (cards.get(unit.troopId)?.obsidian) continue;
-      unit.permanentDamage += effect.value;
+      if (!effect.pierce && hasPassive(cards.get(unit.troopId), 'obsidian')) continue;
+      const damage = effect.pierce ? effect.value : Math.max(0, effect.value - (unit.magicModifierBonus ?? 0));
+      unit.magicModifierBonus = undefined;
+      unit.permanentDamage += damage;
       if (health(unit, cards) === 0) remove(state, unit, cards);
     }
   }
@@ -1009,8 +1085,8 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
     const unit = effect.targetUnitId ? findUnit(state, effect.targetUnitId) : at(state, effect.target);
     if (effect.targetUnitId && unit && effectCoordinate(unit) !== effect.target) continue;
     if (unit && unit.owner === defender) {
-      if (cards.get(unit.troopId)?.obsidian) continue;
-      const lethalThreshold = effect.value - (unit.magicModifierBonus ?? 0);
+      if (!effect.pierce && hasPassive(cards.get(unit.troopId), 'obsidian')) continue;
+      const lethalThreshold = effect.pierce ? effect.value : effect.value - (unit.magicModifierBonus ?? 0);
       unit.magicModifierBonus = undefined;
       if (health(unit, cards) <= lethalThreshold) remove(state, unit, cards);
     }
@@ -1035,7 +1111,7 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
     const defenderModifier = modifier(state, originalDefender, cards, attackerVirtual);
     const attackerPower = health(attacker, cards) + attackerModifier;
     const defenderPower = health(originalDefender, cards) + defenderModifier;
-    const firstStrikeUnit = [attacker, originalDefender].find(unit => cards.get(unit.troopId)?.firstStrike);
+    const firstStrikeUnit = [attacker, originalDefender].find(unit => hasPassive(cards.get(unit.troopId), 'first-strike'));
     let firstStrike: TriggerEvent['firstStrike'];
     if (firstStrikeUnit) {
       const firstStrikeTarget = firstStrikeUnit === attacker ? originalDefender : attacker;
@@ -1076,7 +1152,7 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
     const survivingParticipants = [attacker, originalDefender].filter(unit => state.units.includes(unit));
     clearShield(attacker);
     clearShield(originalDefender);
-    dispatchTrigger(state, { trigger: 'bashResolved', player: attacker.owner, hex: bash.target, troopIds: survivingParticipants.map(unitId), attackerId: unitId(attacker), defenderId: unitId(originalDefender), ...(firstStrike ? { firstStrike } : {}) }, cards, [...new Set(survivingParticipants.map(unit => unit.owner))]);
+        dispatchTrigger(state, { trigger: 'bashResolved', player: attacker.owner, hex: bash.target, troopIds: survivingParticipants.map(unitId), attackerId: unitId(attacker), defenderId: unitId(originalDefender), ...(firstStrike ? { firstStrike } : {}) }, cards, [...new Set(survivingParticipants.map(unit => unit.owner))]);
     state.bashes = state.bashes.filter(item => item !== bash);
   }
   // Keep only the defending player's unresolved effects. Shields live on

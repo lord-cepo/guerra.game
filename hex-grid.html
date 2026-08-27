@@ -284,7 +284,9 @@
       text-shadow: 0 1px 1px #000, 0 0 3px #000, 0 0 6px #000;
       overflow: hidden;
     }
-    .troop-details span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .troop-details > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .magic-detail { color: #c084fc; font-family: inherit; font-style: inherit; font-weight: inherit; }
+    .magic-detail.magic-symbol { font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif; }
     .upgraded-detail { color: #c084fc; }
     .card-visual {
       position: relative;
@@ -400,7 +402,10 @@
     .board-info-frame.player-two-info-frame { fill: rgb(30 58 138 / .4); mask: url(#info-hex-edge-fade); }
     .board-troop-description { fill: #f8fafc; filter: drop-shadow(0 1px 1px #0f172a) drop-shadow(0 0 2px #0f172a); font-size: 10.5px; font-weight: 750; text-anchor: middle; pointer-events: none; user-select: none; }
     .board-troop-description .board-info-glyph { stroke: rgb(15 23 42 / .92); stroke-width: 1.8px; paint-order: stroke fill; }
-    .board-troop-description .board-info-emoji { stroke: none; }
+    .board-troop-description .board-info-emoji {
+      stroke: none;
+      font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+    }
     .board-troop-description .board-health {
       font-size: 11.5px;
       font-weight: 800;
@@ -408,8 +413,8 @@
     }
     .board-troop-description .board-health-heart,
     .board-troop-description .board-health-value {
-      stroke: rgb(15 23 42 / .72);
-      stroke-width: 1px;
+      stroke: rgb(15 23 42 / .92);
+      stroke-width: 1.8px;
       paint-order: stroke fill;
     }
     .board-troop-description .player-one-health { fill: #d96b6b; }
@@ -744,11 +749,16 @@
       opacity: 0;
       pointer-events: none;
     }
-    .magic-shield-animation,
-    .magic-shield-icon {
+    .magic-shield-animation {
       filter: hue-rotate(235deg) saturate(1.8);
     }
-    .magic-modifier { fill: #c084fc; }
+    .board-troop-description .magic-modifier,
+    .bash-stat.magic-modifier {
+      fill: #c084fc !important;
+      stroke: rgb(15 23 42 / .92);
+      stroke-width: 1.8px;
+      paint-order: stroke fill;
+    }
     .shield-flight { pointer-events: none; }
     .bomb-damage-label {
       fill: #f8fafc;
@@ -777,7 +787,19 @@
     }
     .mending-resolution-heart {
       font-size: 62px;
-      animation: damage-slash-sweep 1.5s linear both;
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: mending-heartbeat 1.5s ease-in-out both;
+    }
+    @keyframes mending-heartbeat {
+      0% { opacity: 0; transform: scale(.2); }
+      14% { opacity: 1; transform: scale(1.12); }
+      26% { opacity: 1; transform: scale(.94); }
+      38% { opacity: 1; transform: scale(1.1); }
+      50% { opacity: 1; transform: scale(1); }
+      62% { opacity: 1; transform: scale(1.08); }
+      74% { opacity: 1; transform: scale(1); }
+      100% { opacity: 0; transform: scale(1.2); }
     }
     .projectile-orientation {
       pointer-events: none;
@@ -809,12 +831,16 @@
       fill: rgb(107 114 128 / .5);
       pointer-events: none;
     }
+    #board .pending-action-source-wash {
+      fill: rgb(250 204 21 / .4);
+      pointer-events: none;
+    }
     #board .cell.server-last-acting .action-description-highlight {
       display: none;
     }
     #board .cell.server-last-acting > .hex,
-    #board .cell.server-last-acting > .hex-border-overlay,
-    #board .cell.server-last-acting > .bash-border {
+    #board .cell.server-last-acting > .bash-border,
+    #board .cell.server-last-acting:not(.server-reachable) > .hex-border-overlay {
       fill: transparent !important;
       stroke: transparent !important;
     }
