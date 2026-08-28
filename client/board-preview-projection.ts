@@ -5,6 +5,14 @@ import { actionOfType, healthOf, upgradeBonus, type Troop } from './troop-view.j
 
 export interface ServerMovementPreview { unit: ServerUnitState; coordinate: Coordinate }
 
+function isMovePreview(type: ServerLegalAction['type']): boolean {
+  return type === 'move' || type === 'fly' || type === 'gore' || type === 'resolve-move';
+}
+
+function isDisplacementPreview(type: ServerLegalAction['type']): boolean {
+  return type === 'push' || type === 'pull' || type === 'resolve-pull';
+}
+
 export function pendingActionForPreview(match: ServerMatchState | undefined, pending: ServerLegalAction | undefined): ServerLegalAction | undefined {
   if (!match) return undefined;
   if (pending) return pending;
@@ -13,10 +21,10 @@ export function pendingActionForPreview(match: ServerMatchState | undefined, pen
 }
 
 export function pendingMovementPreview(match: ServerMatchState | undefined, pending: ServerLegalAction | undefined, owner: Player | undefined): ServerMovementPreview | undefined {
-  if (!match || !pending?.coordinate || (pending.type !== 'move' && pending.type !== 'fly' && pending.type !== 'push' && pending.type !== 'pull')) return undefined;
+  if (!match || !pending?.coordinate || (!isMovePreview(pending.type) && !isDisplacementPreview(pending.type))) return undefined;
   let unit: ServerUnitState | undefined;
   let coordinate = pending.coordinate;
-  if (pending.type === 'push' || pending.type === 'pull') {
+  if (isDisplacementPreview(pending.type)) {
     if (!pending.destination) return undefined;
     unit = match.units.find(candidate => candidate.coordinate === pending.coordinate); coordinate = pending.destination;
   } else if (owner) unit = match.units.find(candidate => candidate.owner === owner && candidate.troopId === pending.troopId);
@@ -41,7 +49,7 @@ export function pendingUnitPreviews(
   }
   const source = match.units.find(unit => unit.owner === owner && unit.troopId === pending.troopId);
   if (!source) return [];
-  if (pending.type === 'move' || pending.type === 'fly' || pending.type === 'push' || pending.type === 'pull') {
+  if (isMovePreview(pending.type) || isDisplacementPreview(pending.type)) {
     const movement = pendingMovementPreview(match, pending, owner);
     return movement ? [{ ...movement.unit, coordinate: movement.coordinate }] : [];
   }
@@ -64,12 +72,12 @@ export function pendingUnitPreviews(
 
 export function pendingBash(match: ServerMatchState | undefined, pending: ServerLegalAction | undefined, owner: Player | undefined): ServerBashState | undefined {
   if (!match || !pending || !owner) return undefined;
-  if ((pending.type === 'move' || pending.type === 'fly') && pending.coordinate) {
+  if (isMovePreview(pending.type) && pending.coordinate) {
     const attacker = match.units.find(unit => unit.owner === owner && unit.troopId === pending.troopId);
     const defender = match.units.find(unit => unit.coordinate === pending.coordinate && unit.owner !== owner);
     return attacker && defender ? { attackerId: attacker.id, defenderId: defender.id, target: pending.coordinate } : undefined;
   }
-  if ((pending.type === 'push' || pending.type === 'pull') && pending.coordinate && pending.destination) {
+  if (isDisplacementPreview(pending.type) && pending.coordinate && pending.destination) {
     const attacker = match.units.find(unit => unit.coordinate === pending.coordinate);
     const defender = match.units.find(unit => unit.coordinate === pending.destination);
     return attacker && defender && attacker.owner !== defender.owner ? { attackerId: attacker.id, defenderId: defender.id, target: pending.destination } : undefined;

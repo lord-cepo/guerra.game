@@ -49,7 +49,8 @@ export function createApplicationShell(options: ApplicationShellOptions): Applic
   }
 
   function setResumable(match: ServerMatchState): void {
-    resumableMatch = match; ui.resumeSandbox.textContent = match.sandbox ? 'Resume playground' : 'Resume match'; ui.resumeSandbox.hidden = false;
+    if (!match.sandbox) { resumableMatch = undefined; ui.resumeSandbox.hidden = true; return; }
+    resumableMatch = match; ui.resumeSandbox.textContent = 'Resume playground'; ui.resumeSandbox.hidden = false;
   }
 
   async function login(nickname: string): Promise<void> {
@@ -61,7 +62,7 @@ export function createApplicationShell(options: ApplicationShellOptions): Applic
     const active = await fetch(`/api/matches/active?nickname=${encodeURIComponent(payload.nickname)}`);
     if (!active.ok) return;
     const match = (await active.json() as { match?: ServerMatchState }).match;
-    if (match?.id && (!match.sandbox || playgroundEnabled)) setResumable(match);
+    if (match?.id && match.sandbox && playgroundEnabled) setResumable(match);
   }
 
   async function queueForFormat(format: 8 | 10): Promise<void> {

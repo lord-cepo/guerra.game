@@ -2,6 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { isBoardCoordinate } from '../dist/game/board.js';
 import { applyGameAction, availableActionsFor, combatSummary, controlSummary, createGameState, unitId } from '../dist/game/engine.js';
 
+const diagnosticSnapshotLimit = 100;
+
+function compactDiagnosticState(state) {
+  if (!state) return state;
+  // These growing histories already live in the authoritative/final state.
+  // Copying them into every diagnostic made persistence grow quadratically.
+  const { dashboard: _dashboard, events: _events, triggerEvents: _triggerEvents, legalActions: _legalActions, ...compact } = state;
+  return compact;
+}
+
 export class MatchStore {
   constructor(cardsById) {
     this.cardsById = cardsById;
@@ -48,8 +58,11 @@ export class MatchStore {
     match.diagnostics.snapshots.push({
       at: new Date().toISOString(),
       ...structuredClone(entry),
-      state: structuredClone(state)
+      state: compactDiagnosticState(structuredClone(state))
     });
+    if (match.diagnostics.snapshots.length > diagnosticSnapshotLimit) {
+      match.diagnostics.snapshots.splice(0, match.diagnostics.snapshots.length - diagnosticSnapshotLimit);
+    }
     return state;
   }
 
@@ -269,6 +282,9 @@ export class MatchStore {
       match.game.nextDashboardId ??= (match.game.dashboard.at(-1)?.id ?? 0) + 1;
       match.game.deckOrder ??= { 1: [...match.decks[1]], 2: [...match.decks[2]] };
       match.diagnostics ??= { createdAt: new Date().toISOString(), snapshots: [] };
+      match.diagnostics.snapshots = (match.diagnostics.snapshots ?? [])
+        .slice(-diagnosticSnapshotLimit)
+        .map(snapshot => ({ ...snapshot, state: compactDiagnosticState(snapshot.state) }));
       for (const bash of match.game?.bashes ?? []) {
         const attacker = match.game.units.find(unit => unit.id === bash.attackerId || `${unit.owner}:${unit.troopId}` === bash.attackerId);
         if (attacker) attacker.coordinate = bash.target;

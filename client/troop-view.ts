@@ -382,7 +382,7 @@ export function actionDetails(troop: Troop): string[] {
     }
     if (action.type === 'gore') {
       const damage = action.damage + bonus.left; const distance = action.range + bonus.right;
-      return `${damage}${goreIcon}${distance} (gore): move to a valid straight-line hex within ${distance}, then deal ${damage} physical damage to an enemy troop there after the opponent acts; entering an enemy hex starts a bash, and friendly destinations are forbidden.`;
+      return `${damage}${goreIcon}${distance} (gore): immediately move to a valid straight-line hex within ${distance}; after the opponent acts, deal ${damage} physical damage to every enemy crossed. Entering an enemy hex starts a bash, and friendly destinations are forbidden.`;
     }
     if (action.type === 'bomb') {
       const damage = action.damage + bonus.left; const distance = action.range + bonus.right;

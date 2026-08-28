@@ -73,7 +73,7 @@ The client sends selections and actions. The server validates them against curre
 - `client/board-projectiles.ts`
   - Pure projection of authoritative effects and staged actions into stable ranged, Magic, Cannon, Gore, Bomb, and Upgrade projectile descriptors.
 - `client/board-resolution.ts`
-  - Pure comparison of consecutive authoritative snapshots into Gore movement, damage, bomb-area, replay-projectile, instant-action, and bash-resolution animation models.
+  - Pure comparison of consecutive authoritative snapshots into damage, bomb-area, replay-projectile, instant-action, bash-resolution, and legacy Gore-movement animation models.
 - `client/board-geometry.ts`, `client/board-descriptions.ts`, and `client/card-presentation.ts`
   - Stateless SVG geometry, board typography, card artwork, and hover-card presentation.
 - `client/board-grid-view.ts` and `client/board-preview-projection.ts`
@@ -84,36 +84,36 @@ The client sends selections and actions. The server validates them against curre
   - Own troop tray/drag interaction, WebSocket lifecycle, and match action controls without duplicating authoritative match state.
 - `client/board-animation-view.ts`
   - Reusable reduced-motion-aware SVG primitives for shields, stun, projectile trails, and mending playback.
+- `client/hex-grid-state.ts`
+  - Holds the mutable browser-session state shared by the match integration modules.
+- `client/application-elements.ts` and `client/browser-runtime.ts`
+  - Own required DOM lookup and browser-only asset/API/busy-cursor support used during composition.
+- `client/board-unit-renderer.ts`, `client/board-combat-projection.ts`, and `client/board-inspection-controller.ts`
+  - Own SVG unit/bash drawing, control/modifier projection, and reversible movement/deployment inspection respectively.
+- `client/board-effects-renderer.ts` and `client/board-resolution-effects.ts`
+  - Own projectile/shield/stun/mending presentation and damage/bash/bomb resolution presentation respectively.
+- `client/match-board-actions.ts`
+  - Owns board action selection, staging, confirmation, target/path projection, and match-aware hover details.
+- `client/match-board-renderer.ts`
+  - Reconciles authoritative revisions, derives replay/resolution presentation state, and coordinates board paint order across unit and effect renderers.
+- `client/match-session-controller.ts`
+  - Owns match entry/resume, local-player projection, deck choice, per-match visual-state reset, and authoritative troop-view projection.
 
 ### Browser application
 
 - `hex-grid.html`
   - Application markup, SVG definitions, and the current stylesheet.
 - `hex-grid.ts`
-  - Screen navigation and login/deck UI.
-  - The deck builder's client-only search parses ordinary name terms and `t:` action-kind filters against normalized active and triggered card actions, then renders only matching available cards without changing deck legality or persistence.
-  - WebSocket connection and match rendering.
-  - SVG board construction.
-  - Local action staging and previews.
-  - Troop/card rendering, hover information, and animations.
-
-`hex-grid.ts` remains a large integration module, while animation geometry, timing, projectile projection, and revision-difference projection live in focused client modules. Further extraction should continue at low-coupling boundaries:
-
-```text
-client/board-renderer.ts
-client/action-previews.ts
-client/board-animations.ts
-client/match-controller.ts
-client/screens.ts
-```
-
-Do not perform this refactor incidentally while implementing an unrelated visual adjustment.
+  - Is the browser composition root: it instantiates the application shell, deck builder, connection, action bar, board grid, renderers, and interaction controllers; connects their callbacks; and starts the application.
+  - Detailed lifecycle, projection, rendering, resolution, and board-action behavior live in the client modules above. All browser TypeScript source files remain below 500 lines.
 
 ## Authoritative state flow
 
 Passive-description presentation is explicit: catalogue text wrapped in `~...~` is projected as purple magic-modifier text. The marker is decorative only, is removed by HTML and SVG renderers, and does not affect authoritative modifier resolution.
 
 Pending-resolution snapshots identify their source by owner-scoped unit ID when it is still deployed. The client uses that authoritative identity for source highlighting; resolution legality and passive damage immunity remain engine responsibilities.
+
+Input-bearing triggered actions reuse the ordinary visual projection pipeline. `resolve-move` and `resolve-pull` stage the moved troop and any prospective bash, with Pull recording its authoritative origin for opponent confirmation playback. Instant/death ranged and instant Magic choices preview from the pending resolution's snapshotted origin and damage, then switch to their existing one-shot authoritative resolution presentation on confirmation. Triggered Stun previews the target animation while staged and retains the normal effect-backed playback after confirmation.
 
 Instant-damage animation is reconstructed client-side from two authoritative snapshots: the previous pending resolution supplies origin and damage, while the new revision event supplies the selected target. This presentation does not add a persistent engine effect or delay authoritative resolution.
 
@@ -146,7 +146,9 @@ Mending follows the same audience split while retaining a looping local flight: 
 Persistent bombs do not carry their launch origin in authoritative state. The browser caches the source coordinate when a bomb first appears, keyed by owner/source/target, solely to keep its repeating visual trace stable if the source troop later moves. The cache is discarded when that bomb leaves authoritative state and never affects rules or targeting.
 
 Repeating Bomb, Fire Magic, ranged, and Cannon presentations also retain a browser-local start time under that stable owner/source/kind/target identity. Selection echoes and the confirming revision may rebuild SVG nodes, but they resume the existing cycle with a negative animation delay. Remote target-selection echoes do not construct action animations; the opponent starts the presentation only from the authoritative confirming revision. Cannon groups its authoritative per-hex effects into one source-to-endpoint projectile, and its straight repeating flight ends when those effects resolve. A Bomb trace remains active while its source troop is recorded as that owner's last-acting (inactive) troop and stops when a later troop action makes the bomber available again.
-Gore validates a straight aligned destination within range and records a delayed charge over the entire line. Confirmation leaves the source troop at its origin and keeps the Cannon-style `horns.png` trace repeating through the opponent's turn. After that opponent completes an action, every enemy troop recorded on the charge line receives modifier- and shield-aware physical Gore damage, the source moves to the destination, and a surviving enemy there starts a normal bash. Each damaging path hit emits a `successfulAttack` event carrying Gore as its originating action kind, so hit-triggered passives stack once per damaged troop even though the opponent's response is the current dashboard action. Friendly troops may be crossed but a friendly destination remains invalid. The client derives the eventual movement from the removed Gore marker and authoritative before/after unit coordinates, then sequences movement before damage and bash playback.
+
+Delayed Attack and Magic effects snapshot their source coordinate as `origin`. Projectile reconstruction prefers the live source coordinate but falls back to that origin if the caster has left play, so the opposing client does not lose the pending trajectory or the eventual lethal resolution presentation.
+Gore validates a straight aligned destination within range and snapshots every enemy on the charge line into delayed damage effects. Selection locally projects the source at the endpoint and repeats a direction-rotated, 1.8× `horns.png` head from origin to destination. Confirmation moves the authoritative source immediately and creates any occupied destination bash; only the opponent replays that confirmed movement, while both clients derive the continuing horns from the pending effects. After the opponent completes a true action, every recorded enemy still on its snapshotted hex receives modifier- and shield-aware physical Gore damage, the effects disappear, and the horns stop before slash/health playback. Each damaging path hit emits a `successfulAttack` event carrying Gore as its originating action kind, so hit-triggered passives stack once per damaged troop. Friendly troops may be crossed but a friendly destination remains invalid. Snapshot comparison retains movement-at-resolution support only for older persisted Gore states whose source is still at the recorded origin.
 Attack card qualifiers are carried into the authoritative effect as metadata: `pierce` marks a physical ranged attack that deals its full value without subtracting the target's physical modifier, while still consuming a shield on the target. The client renders attack qualifiers immediately before the ranged emoji (`P🏹` for Pierce and `F🏹` for instant/fast; both may be combined).
 
 Fire Magic ignition removes a bomb from authoritative `bombs` immediately and replaces it with pending area-damage effects. The browser uses the center explosion effect plus the latest Magic event to project the fixed lit-bomb icon until resolution. Preview timing is local; after confirmation the acting client keeps the lit result without replay, while only the opponent constructs the one-shot fire delivery and impact-timed icon switch. Both clients derive one headless repeating caster-to-origin trajectory from the same pending effects and latest Magic event; removing those effects removes the trace before explosion/damage presentation.
@@ -177,6 +179,8 @@ Bash disappearance alone is not a combat-resolution signal: a defender can remov
 
 ## Turns and resolution
 
+A newly created bash is ineligible for combat until an End phase completes. It then resolves in the first subsequent `combat-resolve` phase, regardless of which participant owns that turn. This makes Start-trigger bashes wait through the current player's action and End phase, giving the following player an action in which either participant they control may flee. A bash created by an End-trigger choice becomes eligible when that same End phase finishes and resolves after the following player's action. Legacy persisted bashes without the lifecycle marker are treated as already eligible.
+
 The main phases are documented in `README.md`:
 
 1. `start`
@@ -194,9 +198,9 @@ Local state lives under `data/`:
 - `runtime.json` — active matches, queues, and waiting players.
 - `users.json` — local users/decks.
 - `sandboxes/` — saved Playground checkpoints.
-- `match-logs/` — retained diagnostic histories.
+- `match-logs/` — retained diagnostic histories; only the ten newest log files are kept.
 
-`runtime.json` may become large. Runtime saves are serialized per server instance, written completely to a unique process/save-specific temporary file, and atomically renamed into place. Unique temporary files are required because two server processes can otherwise rename the same shared temp file while it is still being written, publishing NUL-filled or partial JSON. Before replacement, a valid current file is renamed to `runtime.backup.json`; startup falls back to that last-known-good backup when the primary file is missing or malformed. If neither file is valid, startup fails without deleting or replacing either file. Generated runtime data should remain untracked.
+Live-match runtime loading and saving is temporarily disabled at server construction, so restarting the process starts with no active matches or matchmaking queue. Existing runtime files remain untouched for reversibility. User decks, saved Playground checkpoints, and the ten retained diagnostic match logs continue to persist independently. The dormant runtime implementation bounds per-match diagnostics to 100 compact entries without repeated histories and retains its atomic primary/backup write path for when recovery is re-enabled.
 
 ## Testing
 

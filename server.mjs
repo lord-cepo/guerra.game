@@ -18,7 +18,9 @@ const matchStore = new MatchStore(cardsById);
 const userStore = new UserStore(dataDirectory);
 const waitingPlayers = new Map();
 const queuedMatches = new Map();
-const persistence = new Persistence(dataDirectory, matchStore, waitingPlayers, queuedMatches);
+// Live-match runtime recovery is temporarily disabled. User decks, saved
+// playgrounds, and diagnostic match logs continue to persist independently.
+const persistence = new Persistence(dataDirectory, matchStore, waitingPlayers, queuedMatches, { runtimeEnabled: false });
 
 function sandboxState(match) {
   return {

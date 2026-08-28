@@ -20,7 +20,7 @@ coverage/
 npm-debug.log*
 
 # Local game state and diagnostics
-data/runtime.json
+data/runtime*.json*
 data/users.json
 data/sandboxes/
 data/match-logs/

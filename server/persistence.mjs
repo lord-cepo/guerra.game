@@ -3,11 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
 export class Persistence {
-  constructor(dataDirectory, matchStore, waitingPlayers, queuedMatches) {
+  constructor(dataDirectory, matchStore, waitingPlayers, queuedMatches, { runtimeEnabled = true } = {}) {
     this.dataDirectory = dataDirectory;
     this.matchStore = matchStore;
     this.waitingPlayers = waitingPlayers;
     this.queuedMatches = queuedMatches;
+    this.runtimeEnabled = runtimeEnabled;
     this.runtimeFile = resolve(dataDirectory, 'runtime.json');
     this.runtimeBackupFile = resolve(dataDirectory, 'runtime.backup.json');
     this.matchLogDirectory = resolve(dataDirectory, 'match-logs');
@@ -20,6 +21,7 @@ export class Persistence {
   }
 
   async loadRuntime() {
+    if (!this.runtimeEnabled) return;
     const runtime = await this.#readRuntimeWithFallback();
     if (!runtime) return;
     this.matchStore.restore(runtime.matches);
@@ -28,6 +30,7 @@ export class Persistence {
   }
 
   saveRuntime() {
+    if (!this.runtimeEnabled) return Promise.resolve();
     const payload = JSON.stringify({
       matches: this.matchStore.snapshot(),
       waitingPlayers: [...this.waitingPlayers],

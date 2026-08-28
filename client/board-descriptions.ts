@@ -16,6 +16,16 @@ export const boardDescriptionLineHeight = 9;
 
 export function signedModifier(value: number): string { return `${value >= 0 ? '+' : ''}${value}`; }
 
+/** Keep a physical/magic modifier pair centered as one SVG text run. */
+export function writeModifierPair(marker: SVGTextElement, physical: number, magic = 0): void {
+  marker.replaceChildren(document.createTextNode(signedModifier(physical)));
+  if (!magic) return;
+  const magicValue = document.createElementNS(svgNamespace, 'tspan');
+  magicValue.classList.add('magic-modifier');
+  magicValue.textContent = signedModifier(magic);
+  marker.append(magicValue);
+}
+
 function displayedEntries(troop: Troop, options: BoardDescriptionOptions): ReturnType<typeof boardDescriptionEntries> {
   const entries = boardDescriptionEntries(troop, options.includeSelfBlock, options.revealMoveOne);
   const contextual = options.ignitionDamage

@@ -133,6 +133,8 @@ Replay inspection starts with a left click and is suspended while a local troop 
 
 Bash inspection has priority over action rewind. If a staged or confirmed bash occupies a hex, neither participant can rewind from that hex; pointer movement continues to drive the established left/right split-bash focus animation and matching hover details.
 
+When Move, Fly, or triggered Pull projects either Bash participant away, the old split Bash is hidden immediately. If that displacement projects a new Bash at the destination, only the destination split is rendered; the old authoritative record may remain pending until combat resolution but does not produce a stale preview.
+
 ## Current animations
 
 ### Deploy
@@ -180,6 +182,7 @@ Bash inspection has priority over action rewind. If a staged or confirmed bash o
 - The same clipped-half entrance is used for a locally staged move and for the first authoritative render after a confirmed Move or Fly creates a bash.
 - Full-size pictures are not resized.
 - Health and signed modifier are positioned inward.
+- Physical and magic Bash modifiers share one centered SVG text run, so the complete pair remains centered beneath health and cannot overflow toward the outside edge of either half.
 - Hovering a side expands that picture, centers its health/modifier, fades in its normal bottom information, and dissolves the opponent.
 - A Boar Warlord in a bash shows its ordinary permanent physical and magic modifiers in the split-bash stat rows; it gains +1 of each every time it enters a bash.
 - The bottom-left hover card follows the same left/right side under the pointer, including direct crossings through the neutral split state.
@@ -235,8 +238,8 @@ Bash inspection has priority over action rewind. If a staged or confirmed bash o
 
 ### Gore
 
-- Gore uses `M🐏N`: confirmation records a delayed straight charge without moving the troop. The line may cross occupied hexes, although a friendly final destination is invalid.
-- The staged preview uses one upright `horns.png` head with Cannon's straight, repeating materialize/travel/impact cycle and no trail. The horns keep repeating from the stationary source through the opponent's turn. Once that opponent completes an action, the troop moves to the selected endpoint, every enemy recorded along the line receives the normal physical slash/health presentation, and an occupied endpoint starts the ordinary bash flow. Movement precedes the damage and bash playback.
+- Gore uses `M🐏N`: selecting a target locally projects the attacker at the aligned destination while one `horns.png` head, enlarged to 1.8× and rotated along the charge direction, repeats over the straight path. The opponent does not see this unconfirmed projection, and a friendly final destination remains invalid even though intervening troops do not block the charge.
+- Confirmation moves the authoritative troop immediately and starts an occupied destination's bash immediately. The opponent receives the normal source-to-destination movement animation; the acting player keeps the already-previewed destination. Both players retain the repeating horns over the recorded origin-to-destination line until the opponent completes a true action. Removing the pending Gore effects stops the horns and starts modifier-aware slash/health presentation for every recorded enemy path target; no second troop movement is played at damage resolution.
 - Gore damage is modifier- and shield-aware physical damage. It does not damage friendly troops or empty hexes, and it is skipped if its enemy target moves away before resolution.
 
 ### Defense and Self Defense
@@ -247,7 +250,9 @@ Bash inspection has priority over action rewind. If a staged or confirmed bash o
 - A troop with a magic modifier shows its stats as `+physical +magic`, with the magic value colored purple and given the same dark stroke/paint order as the physical value; physical zero remains visible as `+0`, and there is no separate right-side shield icon. Printed trigger rows use the same purple treatment for their magic component. Magic Defense uses the same seven-frame shield sequence and allied flight as physical Defense with a purple filter for staged, confirmed-opponent, triggered-gain, and turn-replay presentation, without duplicating the confirming player's staged animation.
 - Magic Defense uses the same target highlighting and shield-sequence timing as Defense, but the sequence and persistent shield icon receive the purple magic filter. Self-Magic Defense is shown as a separate self action only when the card supports it.
 - Permanent event modifiers are rendered in the modifier line: physical values use the existing magenta treatment, magic values use purple, and a combined value is shown as `+M+N`. Static keyword passives such as Obsidian, Titanium, First Strike, and Steady derive their compact and full descriptions from the shared passive registry; they are catalogue rules rather than separate board overlays.
-- Triggered Frosthorn Pull choices use the existing Pull target/destination projection, while target-specific hit Stun is represented by the existing Stun effect and click replay.
+- Triggered Frosthorn Pull choices use the existing Pull target/destination movement projection for either friendly or enemy troops and replay that displacement to the opponent after confirmation. Optional triggered Move uses the ordinary source/destination dissolve, instant/death ranged and instant Magic choices show their pending-origin projectile preview, and triggered Stun animates over its staged target before retaining the existing confirmed effect and click replay.
+- If multiple troops share a Bash hex and are legal Frosthorn Pull targets, choosing that hex opens an explicit troop chooser before confirmation instead of silently selecting the first participant.
+- Triggered shield gains include troops deployed in the same authoritative revision. Opponent-facing playback waits for the deployment entrance before showing the shield frames, while the acting player sees the gain immediately without replaying deployment.
 - Every input-bearing triggered action includes a visible Skip control and can be skipped with Space. Start-trigger prompts explicitly say that resolving or skipping the trigger returns to the player's normal turn.
 - All shield frames are retained in preload images and explicitly decoded before the application becomes interactive. Their discrete display windows are only 150 ms, so starting downloads without awaiting decoding can otherwise skip or flash frames on the first shield playback.
 - Self Defense plays the sequence directly in the source troop's hex.

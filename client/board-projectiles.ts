@@ -43,10 +43,11 @@ export function confirmedServerProjectiles(match: ServerMatchState, options: Con
     }
     if ((effect.kind !== 'attack' && effect.kind !== 'magic') || !effect.sourceUnitId) continue;
     const source = match.units.find(unit => unit.id === effect.sourceUnitId);
-    if (source) projectiles.push({
-      key: serverProjectileKey(effect.owner, source.id, effect.kind, effect.target),
+    const sourceCoordinate = source?.coordinate ?? effect.origin;
+    if (sourceCoordinate) projectiles.push({
+      key: serverProjectileKey(effect.owner, source?.id ?? effect.sourceUnitId, effect.kind, effect.target),
       kind: effect.kind,
-      source: source.coordinate,
+      source: sourceCoordinate,
       target: effect.target,
       damage: effect.value,
     });
@@ -98,17 +99,22 @@ export function stagedServerProjectile(
   owner: Player | undefined,
   damageForSource: (source: ServerUnitState, kind: 'attack' | 'magic') => number | undefined,
 ): ServerProjectile | undefined {
-  if (!pending?.coordinate || !owner
-    || (pending.type !== 'attack' && pending.type !== 'magic' && pending.type !== 'bomb'
-      && pending.type !== 'cannon' && pending.type !== 'gore' && pending.type !== 'upgrade')) return undefined;
+  if (!pending?.coordinate || !owner) return undefined;
+  const kind = pending.type === 'resolve-death-attack' || pending.type === 'resolve-instant-ranged' ? 'attack'
+    : pending.type === 'resolve-instant-magic' ? 'magic'
+      : pending.type;
+  if (kind !== 'attack' && kind !== 'magic' && kind !== 'bomb' && kind !== 'cannon' && kind !== 'gore' && kind !== 'upgrade') return undefined;
+  const triggered = pending.type.startsWith('resolve-') ? match.pendingResolution : undefined;
   const source = match.units.find(unit => unit.owner === owner && unit.troopId === pending.troopId);
-  const damage = pending.type === 'bomb' || pending.type === 'cannon' || pending.type === 'gore' || pending.type === 'upgrade'
+  const damage = triggered && 'damage' in triggered ? triggered.damage
+    : kind === 'bomb' || kind === 'cannon' || kind === 'gore' || kind === 'upgrade'
     ? 1
-    : source ? damageForSource(source, pending.type) : undefined;
-  if (!source || damage === undefined) return undefined;
+    : source ? damageForSource(source, kind) : undefined;
+  const sourceCoordinate = triggered && 'origin' in triggered ? triggered.origin : source?.coordinate;
+  if (!sourceCoordinate || damage === undefined) return undefined;
   return {
-    key: serverProjectileKey(owner, source.id, pending.type, pending.coordinate),
-    kind: pending.type, source: source.coordinate, target: pending.coordinate,
+    key: serverProjectileKey(owner, source?.id ?? pending.troopId, kind, pending.coordinate),
+    kind, source: sourceCoordinate, target: pending.coordinate,
     damage: Math.max(1, damage), headMode: 'repeat',
   };
 }

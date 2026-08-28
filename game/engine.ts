@@ -40,7 +40,7 @@ export interface Shield { value: number; sourceUnitId?: UnitId; }
 export interface UnitState { id?: UnitId; troopId: string; owner: Player; coordinate: Coordinate; permanentDamage: number; rangedDamageBonus?: number; rangedRangeBonus?: number; combatModifierBonus?: number; bashModifierBonus?: number; magicModifierBonus?: number; stunnedTurns?: number; upgrades?: Upgrade[]; shields?: Shield[]; }
 export interface Effect { owner: Player; sourceTroopId: string; sourceUnitId?: UnitId; targetUnitId?: UnitId; kind: 'attack' | 'cannon' | 'gore' | 'bomb' | 'magic' | 'stun'; target: Coordinate; value: number; /** Pierce attacks ignore the target's physical modifier. */ pierce?: boolean; /** Source coordinate for a moving delayed action, or center of a bomb area effect. */ origin?: Coordinate; /** Final landing coordinate shared by every effect in a delayed Gore charge. */ goreDestination?: Coordinate; }
 export interface Bomb { owner: Player; sourceTroopId: string; coordinate: Coordinate; damage: number; pierce?: boolean; }
-interface Bash { attackerId: string; defenderId: string; target: Coordinate; }
+interface Bash { attackerId: string; defenderId: string; target: Coordinate; /** A newly created bash cannot resolve until an End phase has completed. */ awaitingEnd?: boolean; }
 export interface GameEvent { revision: number; player: Player; action: GameAction; /** Hex vacated by the completed move, flight, or push. */ origin?: Coordinate; }
 export type Trigger = EventCondition;
 /** Runtime context supplied to card passives. `troopIds` always identifies every troop involved. */
@@ -129,6 +129,12 @@ export function combatSummary(state: GameState, troopId: string, cards: Readonly
 }
 function card(cards: ReadonlyMap<string, TroopSeed>, id: string): TroopSeed { const result = cards.get(id); if (!result) throw new Error('Unknown troop.'); return result; }
 function at(state: GameState, coordinate: Coordinate): UnitState | undefined { return state.units.find(unit => unit.coordinate === coordinate); }
+function addBash(state: GameState, attackerId: string, defenderId: string, target: Coordinate): void {
+  state.bashes.push({ attackerId, defenderId, target, awaitingEnd: true });
+}
+function completeEndForBashes(state: GameState): void {
+  for (const bash of state.bashes) delete bash.awaitingEnd;
+}
 /** An effect aimed at a bash hex follows the opposing participant after combat. */
 function offensiveTargetAt(state: GameState, player: Player, coordinate: Coordinate): UnitState | undefined {
   const bash = state.bashes.find(item => item.target === coordinate);
@@ -401,7 +407,7 @@ function stunTargets(state: GameState, owner: Player, origin: Coordinate, range:
 
 function pullTargets(state: GameState, source: UnitState, distance: number, range: number): Array<{ target: UnitState; destination: Coordinate }> {
   const targets: Array<{ target: UnitState; destination: Coordinate }> = [];
-  for (const target of stunTargets(state, source.owner, source.coordinate, range)) {
+  for (const target of state.units.filter(unit => unitId(unit) !== unitId(source) && hexDistance(source.coordinate, unit.coordinate) <= range)) {
     const line = displacementLine('pull', source.coordinate, target.coordinate, distance);
     const destination = line?.at(-1);
     if (!destination || state.bashes.some(bash => bash.target === destination) || at(state, destination)?.owner === target.owner) continue;
@@ -674,7 +680,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       else {
         unit.coordinate = action.coordinate;
         const attackerId = unitId(unit); const defenderId = unitId(target);
-        state.bashes.push({ attackerId, defenderId, target: action.coordinate });
+        addBash(state, attackerId, defenderId, action.coordinate);
         const event: TriggerEvent = { trigger: 'bash', player, hex: action.coordinate, troopIds: [attackerId, defenderId], actingTroopId: unit.troopId, attackerId, defenderId };
         dispatchTrigger(state, { ...event, trigger: 'bashAttack' }, cards, [player]);
         dispatchTrigger(state, { ...event, trigger: 'bashDefense' }, cards, [target.owner]);
@@ -722,12 +728,13 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       const source = findUnit(state, pending.sourceUnitId);
       const target = findUnit(state, action.targetUnitId);
       const line = source && target ? displacementLine('pull', source.coordinate, target.coordinate, pending.distance) : undefined;
-      if (!source || !target || target.owner === player || target.coordinate !== action.coordinate || !line || action.destination !== line.at(-1) || state.bashes.some(bash => bash.target === action.destination)) throw new Error('Pull target is invalid.');
+      if (!source || !target || unitId(target) === unitId(source) || target.coordinate !== action.coordinate || hexDistance(source.coordinate, target.coordinate) > pending.range || !line || action.destination !== line.at(-1) || state.bashes.some(bash => bash.target === action.destination)) throw new Error('Pull target is invalid.');
       const occupant = at(state, action.destination);
       if (occupant?.owner === target.owner) throw new Error('A pulled troop cannot land on a friendly troop.');
+      origin = target.coordinate;
       target.coordinate = action.destination;
       if (occupant) {
-        state.bashes.push({ attackerId: unitId(target), defenderId: unitId(occupant), target: action.destination });
+        addBash(state, unitId(target), unitId(occupant), action.destination);
         const bashEvent: TriggerEvent = { trigger: 'bash', player, hex: action.destination, troopIds: [unitId(target), unitId(occupant)], actingTroopId: source.troopId, attackerId: unitId(target), defenderId: unitId(occupant) };
         dispatchTrigger(state, { ...bashEvent, trigger: 'bashAttack' }, cards, [target.owner]);
         dispatchTrigger(state, { ...bashEvent, trigger: 'bashDefense' }, cards, [occupant.owner]);
@@ -756,6 +763,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     state.phase = 'end';
     const turnPlayer = pending.turnPlayer;
     const opponentOfTurnPlayer = turnPlayer === 1 ? 2 : 1;
+    completeEndForBashes(state);
     dispatchTrigger(state, { trigger: 'opponentEnd', player: turnPlayer, troopIds: [], actingTroopId: pending.sourceTroopId }, cards, [opponentOfTurnPlayer]);
     finishOpenStack(state);
     clearStunAtTurnEnd(state, turnPlayer);
@@ -770,7 +778,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
   // resolve afterward. A Push can create a bash whose defender belongs to the
   // acting player; that Push itself happened before the bash existed and must
   // not be mistaken for the defender's response.
-  const bashesAwaitingResponse = new Set(state.bashes);
+  const bashesReadyToResolve = new Set(state.bashes.filter(bash => !bash.awaitingEnd));
   const commandRow = beginCommandRow(state, player, action, cards);
   if (action.type === 'pass') {
     const turnEvent = { player, troopIds: [] as UnitId[] };
@@ -778,7 +786,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     // magic, bashes, and their temporary upgrades exactly as after any other
     // response action, before end-of-turn triggers run.
     commandRow.status = 'ready'; completePhase(state, 'combat-resolve', cards);
-    resolveAfterDefenderAction(state, player, cards, bashesAwaitingResponse);
+    resolveAfterDefenderAction(state, player, cards, bashesReadyToResolve);
     const endRow = recordPhase(state, 'end', cards);
     dispatchTrigger(state, { ...turnEvent, trigger: 'end' }, cards, [player]);
     state.revision = (state.revision ?? 0) + 1;
@@ -786,6 +794,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     state.events.push({ revision: state.revision, player, action: structuredClone(action) });
     if (state.pendingResolution) return state;
     const opponent = player === 1 ? 2 : 1;
+    completeEndForBashes(state);
     dispatchTrigger(state, { ...turnEvent, trigger: 'opponentEnd' }, cards, [opponent]);
     finishStackAction(state, endRow.id); finishStackAction(state, commandRow.id);
     clearStunAtTurnEnd(state, player);
@@ -832,7 +841,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
         vacatedCoordinate = unit.coordinate;
         const attackerId = unitId(unit); const defenderId = unitId(target);
         unit.coordinate = action.coordinate;
-        state.bashes.push({ attackerId, defenderId, target: action.coordinate });
+        addBash(state, attackerId, defenderId, action.coordinate);
         // A bash begins as soon as the attacker enters an enemy hex. Both
         // sides can react through their specialised trigger or the shared one.
         const bashEvent: TriggerEvent = { trigger: 'bash', player, hex: action.coordinate, troopIds: [attackerId, defenderId], actingTroopId: action.troopId, attackerId, defenderId };
@@ -853,8 +862,18 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       vacatedCoordinate = unit.coordinate;
       const attackerId = unitId(unit);
       const enemiesInPath = line.map(coordinate => at(state, coordinate)).filter((candidate): candidate is UnitState => Boolean(candidate && candidate.owner !== player));
+      unit.coordinate = action.coordinate;
+      if (target) {
+        const defenderId = unitId(target);
+        addBash(state, attackerId, defenderId, action.coordinate);
+        const bashEvent: TriggerEvent = { trigger: 'bash', player, hex: action.coordinate, troopIds: [attackerId, defenderId], actingTroopId: action.troopId, attackerId, defenderId };
+        dispatchTrigger(state, { ...bashEvent, trigger: 'bashAttack' }, cards, [player]);
+        dispatchTrigger(state, { ...bashEvent, trigger: 'bashDefense' }, cards, [target.owner]);
+        dispatchTrigger(state, bashEvent, cards, [player, target.owner]);
+      }
       // A zero-damage marker keeps an empty charge pending and records its
-      // landing hex. Enemy-specific effects snapshot every troop in the line.
+      // path. Enemy-specific effects snapshot every troop in the line while
+      // the attacker and any destination bash move immediately.
       state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: attackerId, kind: 'gore', target: action.coordinate, value: 0, origin: vacatedCoordinate, goreDestination: action.coordinate });
       for (const enemy of enemiesInPath) state.effects.push({
         owner: player, sourceTroopId: action.troopId, sourceUnitId: attackerId,
@@ -893,7 +912,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
         vacatedCoordinate = pushed.coordinate;
         const attackerId = unitId(pushed); const defenderId = unitId(landingOccupant);
         pushed.coordinate = action.destination;
-        state.bashes.push({ attackerId, defenderId, target: action.destination });
+        addBash(state, attackerId, defenderId, action.destination);
         const bashEvent: TriggerEvent = { trigger: 'bash', player, hex: action.destination, troopIds: [attackerId, defenderId], actingTroopId: action.troopId, attackerId, defenderId };
         dispatchTrigger(state, { ...bashEvent, trigger: 'bashAttack' }, cards, [pushed.owner]);
         dispatchTrigger(state, { ...bashEvent, trigger: 'bashDefense' }, cards, [landingOccupant.owner]);
@@ -937,7 +956,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
             if (damage > 0) dispatchTrigger(state, { trigger: 'successfulAttack', player, hex: action.coordinate, troopIds: [unitId(unit), unitId(offensiveTarget)], actingTroopId: unit.troopId, targetUnitId: unitId(offensiveTarget), actionKind: 'ranged' }, cards, [player]);
             if (health(offensiveTarget, cards) === 0) remove(state, offensiveTarget, cards);
           }
-        } else state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: unitId(unit), ...(offensiveTarget ? { targetUnitId: unitId(offensiveTarget) } : {}), kind: 'attack', target: action.coordinate, value: attackDamage(state, troop, unit, cards), ...(printedAttack?.qualifiers?.includes('pierce') ? { pierce: true } : {}) });
+        } else state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: unitId(unit), ...(offensiveTarget ? { targetUnitId: unitId(offensiveTarget) } : {}), kind: 'attack', target: action.coordinate, value: attackDamage(state, troop, unit, cards), origin: unit.coordinate, ...(printedAttack?.qualifiers?.includes('pierce') ? { pierce: true } : {}) });
       }
       else if (action.type === 'mending') {
         const target = at(state, action.coordinate);
@@ -967,7 +986,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
             offensiveTarget.magicModifierBonus = undefined;
             if (health(offensiveTarget, cards) <= lethalThreshold) remove(state, offensiveTarget, cards);
           }
-        } else state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: unitId(unit), ...(offensiveTarget ? { targetUnitId: unitId(offensiveTarget) } : {}), kind: 'magic', target: action.coordinate, value: effectValue(state, troop, cards, unit), ...(magicAction?.qualifiers?.includes('pierce') ? { pierce: true } : {}) });
+        } else state.effects.push({ owner: player, sourceTroopId: action.troopId, sourceUnitId: unitId(unit), ...(offensiveTarget ? { targetUnitId: unitId(offensiveTarget) } : {}), kind: 'magic', target: action.coordinate, value: effectValue(state, troop, cards, unit), origin: unit.coordinate, ...(magicAction?.qualifiers?.includes('pierce') ? { pierce: true } : {}) });
       } else if (action.type === 'stun') {
         if (!offensiveTarget || offensiveTarget.owner === player) throw new Error('Stun must target an enemy troop.');
         const turns = actionOfType(troop, 'stun')?.amount ?? 0;
@@ -987,7 +1006,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     dispatchTrigger(state, { trigger: 'movementUsed', player, hex: action.coordinate, troopIds: [unitId(unit)], actingTroopId: action.troopId }, cards, [player]);
   }
   commandRow.status = 'ready'; completePhase(state, 'combat-resolve', cards);
-  resolveAfterDefenderAction(state, player, cards, bashesAwaitingResponse);
+  resolveAfterDefenderAction(state, player, cards, bashesReadyToResolve);
   const actingUnit = state.units.find(item => item.owner === player && item.troopId === action.troopId);
   const turnEvent = { player, hex: actingUnit?.coordinate ?? ('coordinate' in action ? action.coordinate : undefined), troopIds: actingUnit ? [unitId(actingUnit)] : [], actingTroopId: action.troopId };
   // Combat completes before end-of-turn passives. Own and opponent triggers
@@ -1001,6 +1020,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
   state.events.push({ revision: state.revision, player, action: structuredClone(action), ...(vacatedCoordinate ? { origin: vacatedCoordinate } : {}) });
   if (state.pendingResolution) return state;
   const opponent = player === 1 ? 2 : 1;
+  completeEndForBashes(state);
   dispatchTrigger(state, { ...turnEvent, trigger: 'opponentEnd' }, cards, [opponent]);
   finishStackAction(state, endRow.id); finishStackAction(state, commandRow.id);
   clearStunAtTurnEnd(state, player);
@@ -1013,7 +1033,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
   return state;
 }
 
-function resolveAfterDefenderAction(state: GameState, defender: Player, cards: ReadonlyMap<string, TroopSeed>, bashesAwaitingResponse: ReadonlySet<Bash>): void {
+function resolveAfterDefenderAction(state: GameState, defender: Player, cards: ReadonlyMap<string, TroopSeed>, bashesReadyToResolve: ReadonlySet<Bash>): void {
   const resolvedUpgradeSources = new Set<UnitId>();
   // The fallback keeps older persisted bash snapshots compatible; new bashes
   // already store the attacker directly on the contested hex.
@@ -1039,24 +1059,6 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
       }
       if (health(unit, cards) === 0) remove(state, unit, cards);
     }
-  }
-  const resolvingGoreCharges = new Map<UnitId, Effect>();
-  for (const effect of state.effects.filter(item => item.owner !== defender && item.kind === 'gore' && item.sourceUnitId && item.goreDestination)) {
-    resolvingGoreCharges.set(effect.sourceUnitId!, effect);
-  }
-  for (const [sourceId, effect] of resolvingGoreCharges) {
-    const source = findUnit(state, sourceId);
-    const destination = effect.goreDestination;
-    if (!source || !destination) continue;
-    source.coordinate = destination;
-    const target = state.units.find(unit => unit !== source && unit.coordinate === destination);
-    if (!target || target.owner === source.owner || state.bashes.some(bash => bash.target === destination)) continue;
-    const attackerId = unitId(source); const defenderId = unitId(target);
-    state.bashes.push({ attackerId, defenderId, target: destination });
-    const bashEvent: TriggerEvent = { trigger: 'bash', player: source.owner, hex: destination, troopIds: [attackerId, defenderId], actingTroopId: source.troopId, attackerId, defenderId };
-    dispatchTrigger(state, { ...bashEvent, trigger: 'bashAttack' }, cards, [source.owner]);
-    dispatchTrigger(state, { ...bashEvent, trigger: 'bashDefense' }, cards, [target.owner]);
-    dispatchTrigger(state, bashEvent, cards, [source.owner, target.owner]);
   }
   // Cannon and Bomb are magic damage: the physical modifier is ignored, but
   // the magic modifier reduces the blast and is consumed, and Obsidian blocks
@@ -1092,16 +1094,15 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
     }
   }
   for (const bash of [...state.bashes]) {
-    if (!bashesAwaitingResponse.has(bash)) continue;
+    if (!bashesReadyToResolve.has(bash)) continue;
     const attacker = findUnit(state, bash.attackerId);
     const originalDefender = findUnit(state, bash.defenderId);
     if (!attacker || !originalDefender) { state.bashes = state.bashes.filter(item => item !== bash); continue; }
-    if (originalDefender.owner !== defender) continue;
-    // The defending unit may spend its response action moving away.  That is
-    // a dodge, not combat: the attacker enters the now-vacant hex and neither
-    // unit receives bash damage.
+    // Once an End phase has passed, either participant may spend the action
+    // before this combat window moving away. That is a dodge, not combat: the
+    // attacker enters the now-vacant hex and neither unit receives bash damage.
     const participantMoved = attacker.coordinate !== bash.target || originalDefender.coordinate !== bash.target;
-    if (participantMoved || originalDefender.owner !== defender) {
+    if (participantMoved) {
       dispatchTrigger(state, { trigger: 'bashRetreat', player: attacker.owner, hex: bash.target, troopIds: [unitId(attacker), unitId(originalDefender)], attackerId: unitId(attacker), defenderId: unitId(originalDefender) }, cards, [attacker.owner, originalDefender.owner]);
       state.bashes = state.bashes.filter(item => item !== bash);
       continue;

@@ -167,6 +167,47 @@ test('a skipped Start trigger resumes the same normal turn and does not make its
   assert.equal(finished.activePlayer, 2);
 });
 
+test('Frosthorn Yak Start Pull can target and move a friendly troop', () => {
+  const state = { activePlayer: 2, phase: 'action', units: [
+    { id: '1:frosthorn-yak', troopId: 'frosthorn-yak', owner: 1, coordinate: '-1,1', permanentDamage: 0 },
+    { id: '1:merino-ram', troopId: 'merino-ram', owner: 1, coordinate: '2,1', permanentDamage: 0 },
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const started = applyGameAction(state, 2, { type: 'pass' }, cards);
+  const pull = availableActionsFor(started, 1, 'frosthorn-yak', cards)
+    .find(action => action.type === 'resolve-pull' && action.targetUnitId === '1:merino-ram');
+  assert.deepEqual(pull, {
+    type: 'resolve-pull', troopId: 'frosthorn-yak', coordinate: '2,1', destination: '0,1', targetUnitId: '1:merino-ram',
+  });
+  const resolved = applyGameAction(started, 1, pull, cards);
+  assert.equal(resolved.units.find(unit => unit.id === '1:merino-ram')?.coordinate, '0,1');
+  assert.equal(resolved.events.at(-1).origin, '2,1', 'triggered Pull records its origin for confirmed movement playback');
+  assert.equal(resolved.activePlayer, 1, 'the Start Pull returns to the same player normal action');
+});
+
+test('a Frosthorn Start Pull bash waits through the current combat phase and lets the next player flee', () => {
+  const state = { activePlayer: 2, phase: 'action', units: [
+    { id: '1:frosthorn-yak', troopId: 'frosthorn-yak', owner: 1, coordinate: '-1,1', permanentDamage: 0 },
+    { id: '1:merino-ram', troopId: 'merino-ram', owner: 1, coordinate: '0,1', permanentDamage: 0 },
+    { id: '2:squirrel-king', troopId: 'squirrel-king', owner: 2, coordinate: '2,1', permanentDamage: 0 },
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const started = applyGameAction(state, 2, { type: 'pass' }, cards);
+  const pull = availableActionsFor(started, 1, 'frosthorn-yak', cards)
+    .find(action => action.type === 'resolve-pull' && action.targetUnitId === '2:squirrel-king');
+  const bashed = applyGameAction(started, 1, pull, cards);
+  assert.equal(bashed.bashes.length, 1);
+  assert.equal(bashed.bashes[0].awaitingEnd, true);
+
+  const playerOneActed = applyGameAction(bashed, 1, { type: 'pass' }, cards);
+  assert.equal(playerOneActed.bashes.length, 1, 'combat before the first completed End does not resolve the bash');
+  assert.equal(playerOneActed.bashes[0].awaitingEnd, undefined);
+  assert.equal(playerOneActed.activePlayer, 2);
+
+  const fled = applyGameAction(playerOneActed, 2, { type: 'move', troopId: 'squirrel-king', coordinate: '0,2' }, cards);
+  assert.equal(fled.bashes.length, 0);
+  assert.equal(fled.units.find(unit => unit.id === '2:squirrel-king')?.coordinate, '0,2');
+  assert.ok(fled.triggerEvents.some(event => event.trigger === 'bashRetreat'));
+});
+
 test('Boar Warlord Start stride offers an optional one-hex move', () => {
   const state = { activePlayer: 2, phase: 'action', units: [
     { id: '1:boar-warlord', troopId: 'boar-warlord', owner: 1, coordinate: '1,1', permanentDamage: 0 }

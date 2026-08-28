@@ -148,7 +148,7 @@ test('stun clears both modifiers and skips the target troop for one turn', () =>
   assert.equal(afterTurn.units.find(unit => unit.troopId === 'squirrel-king')?.stunnedTurns, undefined);
 });
 
-test('a push-created bash waits for a later defender response even when the defender owns the pusher', () => {
+test('a push-created bash resolves in the first combat phase after an End phase', () => {
   const state = { activePlayer: 2, units: [
     { id: '2:bramble-scout', troopId: 'bramble-scout', owner: 2, coordinate: '1,-2', permanentDamage: 0 },
     { id: '1:raven-prince', troopId: 'raven-prince', owner: 1, coordinate: '1,-1', permanentDamage: 0 },
@@ -162,13 +162,7 @@ test('a push-created bash waits for a later defender response even when the defe
   assert.equal(pushed.activePlayer, 1);
 
   const attackerResponded = applyGameAction(pushed, 1, { type: 'pass' }, cards);
-  assert.equal(attackerResponded.bashes.length, 1, 'the bash still waits for its actual defender');
-  const attackerEndResolved = applyGameAction(attackerResponded, 1, { type: 'resolve-pass', troopId: 'raven-prince' }, cards);
-  assert.equal(attackerEndResolved.bashes.length, 1, 'the attacker End trigger does not resolve the defender’s bash');
-  assert.equal(attackerEndResolved.activePlayer, 2);
-
-  const defenderResponded = applyGameAction(attackerEndResolved, 2, { type: 'pass' }, cards);
-  assert.equal(defenderResponded.bashes.length, 0, 'the bash resolves after the defender response');
+  assert.equal(attackerResponded.bashes.length, 0, 'the first combat-resolve after the intervening End resolves the bash');
 });
 
 test('a pusher can choose either participant sharing a bash hex', () => {
@@ -304,28 +298,28 @@ test('cannon can fire across the central gap to a legal hex beyond it', () => {
 
 test('gore moves to a valid line destination and delays enemy physical damage', () => {
   cards.set('gore-tester', {
-    id: 'gore-tester', name: 'Gore Tester', role: 'troop', baseHealth: 1,
+    id: 'gore-tester', name: 'Gore Tester', role: 'troop', baseHealth: 10,
     deploymentRegions: ['starting'], actions: [{ kind: 'gore', amount: 2, range: 3 }]
   });
   const state = { activePlayer: 1, units: [
     { troopId: 'gore-tester', owner: 1, coordinate: '1,2', permanentDamage: 0 },
-    { troopId: 'tiger-queen', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+    { troopId: 'tiger-queen', owner: 2, coordinate: '1,1', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const fired = applyGameAction(state, 1, { type: 'gore', troopId: 'gore-tester', coordinate: '1,0' }, cards);
   const gore = fired.effects.find(effect => effect.kind === 'gore' && effect.targetUnitId);
-  assert.equal(fired.units.find(unit => unit.troopId === 'gore-tester')?.coordinate, '1,2', 'Gore remains at its origin during the response turn');
+  assert.equal(fired.units.find(unit => unit.troopId === 'gore-tester')?.coordinate, '1,0', 'Gore moves immediately when confirmed');
   assert.deepEqual(gore, {
     owner: 1, sourceTroopId: 'gore-tester', sourceUnitId: '1:gore-tester', targetUnitId: '2:tiger-queen',
-    kind: 'gore', target: '1,0', value: 2, origin: '1,2', goreDestination: '1,0'
+    kind: 'gore', target: '1,1', value: 2, origin: '1,2', goreDestination: '1,0'
   });
   assert.equal(fired.units.find(unit => unit.troopId === 'tiger-queen')?.permanentDamage, 0);
-  assert.equal(fired.bashes.length, 0, 'the destination bash does not start before Gore lands');
+  assert.equal(fired.bashes.length, 0, 'an empty destination does not start a bash');
 
   const resolved = applyGameAction(fired, 2, { type: 'pass' }, cards);
   assert.equal(resolved.units.find(unit => unit.troopId === 'gore-tester')?.coordinate, '1,0');
   assert.equal(resolved.units.find(unit => unit.troopId === 'tiger-queen')?.permanentDamage, 1, 'physical gore damage is reduced by the target modifier');
   assert.equal(resolved.effects.some(effect => effect.kind === 'gore'), false);
-  assert.equal(resolved.bashes.length, 1, 'an occupied destination starts a bash when Gore lands');
+  assert.equal(resolved.bashes.length, 0);
 });
 
 test('Merino Ram can Gore the saved-playground enemy at full range three', () => {
@@ -339,7 +333,8 @@ test('Merino Ram can Gore the saved-playground enemy at full range three', () =>
   const legal = availableActionsFor(state, 2, 'merino-ram', cards);
   assert.ok(legal.some(action => action.type === 'gore' && action.coordinate === '0,2'));
   const gored = applyGameAction(state, 2, { type: 'gore', troopId: 'merino-ram', coordinate: '0,2' }, cards);
-  assert.equal(gored.units.find(unit => unit.troopId === 'merino-ram')?.coordinate, '-3,-1');
+  assert.equal(gored.units.find(unit => unit.troopId === 'merino-ram')?.coordinate, '0,2');
+  assert.equal(gored.bashes.length, 1, 'Gore starts its destination bash on confirmation');
   assert.ok(gored.effects.some(effect => effect.kind === 'gore' && effect.target === '0,2' && effect.value === 2 && effect.goreDestination === '0,2'));
 });
 
@@ -355,11 +350,10 @@ test('Merino Ram can Gore across intervening Yak and Crane troops', () => {
   const legal = availableActionsFor(state, 2, 'merino-ram', cards);
   assert.ok(legal.some(action => action.type === 'gore' && action.coordinate === '-3,-4'));
   const gored = applyGameAction(state, 2, { type: 'gore', troopId: 'merino-ram', coordinate: '-3,-4' }, cards);
-  assert.equal(gored.units.find(unit => unit.troopId === 'merino-ram')?.coordinate, '-3,-1');
+  assert.equal(gored.units.find(unit => unit.troopId === 'merino-ram')?.coordinate, '-3,-4');
   assert.deepEqual(gored.effects.filter(effect => effect.kind === 'gore' && effect.targetUnitId).map(effect => effect.targetUnitId), ['1:frosthorn-yak', '1:bellwing-crane']);
-  const ready = gored.pendingResolution
-    ? applyGameAction(gored, 1, { type: 'resolve-pass', troopId: gored.pendingResolution.sourceTroopId }, cards)
-    : gored;
+  let ready = gored;
+  while (ready.pendingResolution) ready = applyGameAction(ready, 1, { type: 'resolve-pass', troopId: ready.pendingResolution.sourceTroopId }, cards);
   const resolved = applyGameAction(ready, 1, { type: 'pass' }, cards);
   assert.equal(resolved.units.find(unit => unit.troopId === 'merino-ram')?.coordinate, '-3,-4');
   assert.equal(resolved.effects.some(effect => effect.kind === 'gore'), false);
@@ -375,9 +369,8 @@ test('Ironhide Boar Pup gains both permanent modifiers once per troop damaged by
     ], effects: [], bashes: [], lastActingTroopId: {}
   };
   const charged = applyGameAction(state, 2, { type: 'gore', troopId: 'ironhide-boar-pup', coordinate: '-3,-4' }, cards);
-  const ready = charged.pendingResolution
-    ? applyGameAction(charged, 1, { type: 'resolve-pass', troopId: charged.pendingResolution.sourceTroopId }, cards)
-    : charged;
+  let ready = charged;
+  while (ready.pendingResolution) ready = applyGameAction(ready, 1, { type: 'resolve-pass', troopId: ready.pendingResolution.sourceTroopId }, cards);
   const resolved = applyGameAction(ready, 1, { type: 'pass' }, cards);
   const boar = resolved.units.find(unit => unit.troopId === 'ironhide-boar-pup');
   assert.equal(boar?.combatModifierBonus, 2);
@@ -392,7 +385,6 @@ test('gore rejects friendly destinations and moves to empty valid destinations',
   ], effects: [], bashes: [], lastActingTroopId: {} };
   assert.throws(() => applyGameAction(state, 1, { type: 'gore', troopId: 'gore-tester', coordinate: '1,0' }, cards), /friendly troop/);
   const empty = applyGameAction(state, 1, { type: 'gore', troopId: 'gore-tester', coordinate: '1,1' }, cards);
-  assert.equal(empty.units.find(unit => unit.troopId === 'gore-tester')?.coordinate, '1,2');
+  assert.equal(empty.units.find(unit => unit.troopId === 'gore-tester')?.coordinate, '1,1');
   assert.ok(empty.effects.some(effect => effect.kind === 'gore' && effect.value === 0 && effect.goreDestination === '1,1'));
 });
-

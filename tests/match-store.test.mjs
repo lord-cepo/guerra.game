@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { troopSeeds } from '../dist/game/cards.js';
+import { createGameState } from '../dist/game/engine.js';
 import { MatchStore } from '../server/match-store.mjs';
 
 const cards = new Map(troopSeeds.map(card => [card.id, card]));
@@ -196,6 +197,39 @@ test('diagnostic logs retain board snapshots alongside each accepted action', ()
   assert.deepEqual(action.action, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' });
   assert.equal(action.state.units[0].coordinate, '1,2');
   assert.equal(log.finalState.revision, 1);
+});
+
+test('diagnostics are bounded and do not duplicate growing public histories', () => {
+  const store = new MatchStore(cards);
+  const created = store.createMatch('alice', 'bob', deck, deck, 8);
+  const match = store.matches.get(created.id);
+  match.game.dashboard = [{ id: 1 }];
+  match.game.events = [{ revision: 1 }];
+  match.game.triggerEvents = [{ trigger: 'start' }];
+  for (let index = 0; index < 125; index += 1) store.recordDiagnostic(match, { kind: 'selection', index });
+  const log = store.diagnosticLog(created.id);
+  assert.equal(log.snapshots.length, 100);
+  assert.equal(log.snapshots[0].index, 25);
+  assert.equal('dashboard' in log.snapshots.at(-1).state, false);
+  assert.equal('events' in log.snapshots.at(-1).state, false);
+  assert.equal('triggerEvents' in log.snapshots.at(-1).state, false);
+  assert.equal('legalActions' in log.snapshots.at(-1).state, false);
+});
+
+test('restoring old matches compacts and bounds their diagnostic snapshots', () => {
+  const store = new MatchStore(cards);
+  const snapshots = Array.from({ length: 120 }, (_, index) => ({
+    index,
+    state: { revision: index, units: [], dashboard: [{ id: index }], events: [{ revision: index }], triggerEvents: [{ trigger: 'start' }], legalActions: { 1: [] } }
+  }));
+  store.restore([['old-match', {
+    id: 'old-match', players: { 1: 'alice', 2: 'bob' }, format: 8,
+    decks: { 1: deck, 2: deck }, game: createGameState(), diagnostics: { createdAt: 'old', snapshots }
+  }]]);
+  const restored = store.matches.get('old-match').diagnostics.snapshots;
+  assert.equal(restored.length, 100);
+  assert.equal(restored[0].index, 20);
+  assert.deepEqual(restored.at(-1).state, { revision: 119, units: [] });
 });
 
 test('a player loses when their last living card is unavailable after the opponent acts', () => {

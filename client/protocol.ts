@@ -57,6 +57,7 @@ export interface ServerBashState {
   attackerId: string;
   defenderId: string;
   target: Coordinate;
+  awaitingEnd?: boolean;
 }
 
 export interface ServerControlState {

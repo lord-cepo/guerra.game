@@ -49,6 +49,22 @@ test('runtime loading falls back to the last valid backup', async t => {
   assert.deepEqual(restored, [[['recovered', { revision: 7 }]]]);
 });
 
+test('runtime persistence can be disabled without affecting other persistence methods', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'guerra-runtime-disabled-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const state = { matches: [['live', { revision: 1 }]] };
+  const restored = [];
+  const persistence = new Persistence(directory, {
+    snapshot: () => state.matches,
+    restore: matches => restored.push(matches),
+    diagnosticLog: () => undefined,
+  }, new Map([[10, 'Blue']]), new Map(), { runtimeEnabled: false });
+  await persistence.saveRuntime();
+  await persistence.loadRuntime();
+  await assert.rejects(readFile(join(directory, 'runtime.json'), 'utf8'), error => error.code === 'ENOENT');
+  assert.deepEqual(restored, []);
+});
+
 test('runtime saves from separate persistence instances never publish partial JSON', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'guerra-runtime-concurrent-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

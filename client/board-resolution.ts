@@ -85,6 +85,10 @@ export function resolvedGoreMovementBetween(previous: ServerMatchState | undefin
     && effect.sourceUnitId && effect.origin && effect.goreDestination
     && !next.effects.some(candidate => effectIdentity(candidate) === effectIdentity(effect)));
   if (!marker?.sourceUnitId || !marker.origin || !marker.goreDestination) return undefined;
+  const previousUnit = previous.units.find(candidate => candidate.id === marker.sourceUnitId);
+  // Current Gore moves on confirmation. Only legacy snapshots whose attacker
+  // was still parked at the origin need a movement animation at resolution.
+  if (previousUnit?.coordinate !== marker.origin) return undefined;
   const unit = next.units.find(candidate => candidate.id === marker.sourceUnitId);
   return unit ? { unit, origin: marker.origin, destination: marker.goreDestination } : undefined;
 }
@@ -179,7 +183,7 @@ export function resolvedDamageAnimations(previous: ServerMatchState | undefined,
       delay: effects.some(effect => effect.kind === 'bomb')
         ? explosionDelay + bombExplosionDuration
         : effects.some(effect => effect.kind === 'gore')
-          ? goreResolutionDelay(next, options) + movementAnimationDuration
+          ? goreResolutionDelay(next, options)
           : options.replayingLastTurn && effects.some(effect => effect.kind === 'attack' || effect.kind === 'magic' || effect.kind === 'cannon')
             ? projectileTravelDuration + projectileImpactDuration
             : 0,
