@@ -275,7 +275,7 @@ function appendBashResolutionAnimations(match: ServerMatchState): void {
       modifier.textContent = signedModifier(unit.combat.modifier);
       ui.append(health, modifier);
       cell.cell.append(ui);
-      const won = unit.id === animation.winnerId;
+      const won = animation.continues || unit.id === animation.winnerId;
       const finalClip = won ? 'inset(0)' : side === 'left' ? 'inset(0 100% 0 0)' : 'inset(0 0 0 100%)';
       picture.animate([{ clipPath: getComputedStyle(picture).clipPath }, { clipPath: finalClip, opacity: won ? 1 : 0 }], {
         duration: 420,

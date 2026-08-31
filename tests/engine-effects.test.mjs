@@ -47,7 +47,7 @@ test('“bonus if condition” effects are calculated live and disappear with th
   assert.equal(combatBreakdown(noBash, '1:canyon-ibex', cards).modifier, 1, 'neither bash-only bonus is stored after the condition ends');
 });
 
-test('event triggers fire once per event and their bonuses accumulate', () => {
+test('an action trigger fires once, then its newly inactive source cannot repeat it', () => {
   const state = { activePlayer: 1, units: [
     { id: '1:sahel-porcupine', troopId: 'sahel-porcupine', owner: 1, coordinate: '1,1', permanentDamage: 0 },
     { id: '2:squirrel-king', troopId: 'squirrel-king', owner: 2, coordinate: '1,-1', permanentDamage: 0 }
@@ -56,10 +56,9 @@ test('event triggers fire once per event and their bonuses accumulate', () => {
   dispatchTrigger(state, event, cards, [1]);
   dispatchTrigger(state, event, cards, [1]);
   const porcupine = state.units[0];
-  assert.equal(porcupine.rangedDamageBonus, 2);
-  assert.equal(porcupine.rangedRangeBonus, 2);
-  const attack = applyGameAction(state, 1, { type: 'attack', troopId: 'sahel-porcupine', coordinate: '1,-1' }, cards);
-  assert.equal(attack.effects[0]?.value, 3, 'both fired triggers permanently improve this match’s ranged attack');
+  assert.equal(porcupine.rangedDamageBonus, 1);
+  assert.equal(porcupine.rangedRangeBonus, 1);
+  assert.deepEqual(availableActionsFor(state, 1, 'sahel-porcupine', cards), []);
 });
 
 test('deployed static temples boost their owner’s ranged and magic values', () => {
@@ -144,7 +143,7 @@ test('Temple of the Last Bell resolves one chosen instant ranged hex', () => {
   assert.equal(first.activePlayer, 1);
 });
 
-test('Boar Warlord gains +1 physical and +1 magic modifier when it enters a bash', () => {
+test('triggered physical and magic modifiers use temporary shield storage', () => {
   const state = { activePlayer: 1, units: [
     { id: '1:boar-warlord', troopId: 'boar-warlord', owner: 1, coordinate: '1,1', permanentDamage: 0 },
     { id: '2:coastal-heron', troopId: 'coastal-heron', owner: 2, coordinate: '1,0', permanentDamage: 0 }
@@ -152,8 +151,16 @@ test('Boar Warlord gains +1 physical and +1 magic modifier when it enters a bash
   const moved = applyGameAction(state, 1, { type: 'move', troopId: 'boar-warlord', coordinate: '1,0' }, cards);
   assert.equal(moved.bashes.length, 1);
   const boar = moved.units.find(unit => unit.troopId === 'boar-warlord');
-  assert.equal(boar?.combatModifierBonus, 1, 'entering a bash grants +1 physical modifier');
+  assert.deepEqual(boar?.shields?.map(shield => shield.value), [1], 'entering a bash grants a temporary +1 physical modifier');
   assert.equal(boar?.magicModifierBonus, 1, 'entering a bash grants +1 magic modifier');
+});
+
+test('performing an action no longer consumes a physical modifier', () => {
+  const state = { activePlayer: 1, units: [
+    { id: '1:tiger-queen', troopId: 'tiger-queen', owner: 1, coordinate: '1,1', permanentDamage: 0, shields: [{ value: 2, sourceUnitId: '1:tiger-queen' }] }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const moved = applyGameAction(state, 1, { type: 'move', troopId: 'tiger-queen', coordinate: '1,2' }, cards);
+  assert.deepEqual(moved.units[0].shields?.map(shield => shield.value), [2]);
 });
 
 test('troop shields survive opponent End until their physical attack resolves', () => {
@@ -242,7 +249,7 @@ test('a bomb stays inert until fire magic lights its delayed neutral seven-hex e
   const thrown = applyGameAction(state, 1, { type: 'bomb', troopId: 'bombardier-beetle', coordinate: '1,-1' }, cards);
   assert.deepEqual(thrown.bombs, [{ owner: 1, sourceTroopId: 'bombardier-beetle', coordinate: '1,-1', damage: 2 }]);
   assert.deepEqual(thrown.effects, [], 'throwing the bomb causes no damage');
-  const repeatedThrow = { ...thrown, activePlayer: 1, lastActingTroopId: {} };
+  const repeatedThrow = { ...thrown, activePlayer: 1, lastActingTroopId: {}, units: thrown.units.map(unit => ({ ...unit, inactiveOnTurn: undefined, inactiveUntilTurn: undefined })) };
   const merged = applyGameAction(repeatedThrow, 1, { type: 'bomb', troopId: 'bombardier-beetle', coordinate: '1,-1' }, cards);
   assert.deepEqual(merged.bombs, [{ owner: 1, sourceTroopId: 'bombardier-beetle', coordinate: '1,-1', damage: 4 }], 'a bomb thrown onto an occupied bomb hex merges by summing damage');
 

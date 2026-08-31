@@ -47,9 +47,9 @@ test('side-card summaries include card-level self defense capabilities', () => {
 });
 
 test('board trigger rows identify their magic modifier component', () => {
-  const deploy = boardDescriptionEntries(createTroopView('duelist-scorpion', 1)).find(line => line.text === 'Deploy: +3 ~+3~');
+  const deploy = boardDescriptionEntries(createTroopView('duelist-scorpion', 1)).find(line => line.text === 'Deploy [[enemy-dark:⬢]]: +3 ~+3~');
   assert.equal(deploy?.magicModifier, true);
-  const physicalOnly = boardDescriptionEntries(createTroopView('thunder-toad', 1)).find(line => line.text === 'Stun: +1');
+  const physicalOnly = boardDescriptionEntries(createTroopView('thunder-toad', 1)).find(line => line.text === '🚫: +1');
   assert.equal(physicalOnly?.magicModifier, false);
 });
 
@@ -226,7 +226,7 @@ test('static passives drive both gameplay lookup and generated card descriptions
   const steady = createTroopView('canyon-hawk', 1);
   assert.ok(hasPassive(catalogue.get('iron-bell-golem'), 'titanium'));
   assert.ok(fullEffectLines(titanium).includes('Titanium'));
-  assert.ok(cardRuleDetails(titanium).includes('Titanium: immune to physical Attack and Gore damage.'));
+  assert.ok(cardRuleDetails(titanium).includes('Titanium: immune to incoming physical Attack, Gore, and Bash damage; it still deals Bash damage normally.'));
   assert.ok(fullEffectLines(obsidian).includes('Obsidian'));
   assert.ok(cardRuleDetails(obsidian).includes('Obsidian: immune to magic damage sources.'));
   assert.ok(fullEffectLines(steady).includes('Steady'));

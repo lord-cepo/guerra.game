@@ -127,7 +127,7 @@ function isServerLastActing(owner: Player, troopId: string): boolean {
 
 function isServerInactive(owner: Player, troopId: string): boolean {
   const unit = state.serverMatch?.units.find(candidate => candidate.owner === owner && candidate.troopId === troopId);
-  return isServerLastActing(owner, troopId) || (unit?.stunnedTurns ?? 0) > 0;
+  return (unit?.inactive ?? isServerLastActing(owner, troopId)) || (unit?.stunnedTurns ?? 0) > 0;
 }
 
 function appendInactiveTroopWash(parent: SVGGElement, position: Point, clipId?: string): void {

@@ -3,9 +3,9 @@ export type RegionType = 'starting' | 'intermediate' | 'front';
 export type TroopRole = 'hero' | 'troop' | 'temple';
 export type PassiveKind = 'first-strike' | 'obsidian' | 'titanium' | 'steady';
 
-export type ActionKind = 'phase' | 'deploy' | 'pass' | 'move' | 'fly' | 'ranged' | 'cannon' | 'gore' | 'fire' | 'defense' | 'bomb' | 'push' | 'pull' | 'stun' | 'mending' | 'upgrade' | 'heal' | 'damage' | 'modifier' | 'revive';
+export type ActionKind = 'phase' | 'deploy' | 'pass' | 'move' | 'fly' | 'ranged' | 'cannon' | 'gore' | 'fire' | 'defense' | 'bomb' | 'push' | 'pull' | 'stun' | 'mending' | 'upgrade' | 'heal' | 'damage' | 'modifier' | 'life' | 'maxlife' | 'revive';
 export type ActionAmount = number | readonly number[];
-export type ActionQualifier = 'start' | 'action' | 'action-resolve' | 'combat-resolve' | 'end' | 'instant' | 'optional' | 'adjacent' | 'permanent' | 'attack' | 'magic' | 'bash' | 'pierce';
+export type ActionQualifier = 'start' | 'action' | 'action-resolve' | 'combat-resolve' | 'end' | 'instant' | 'optional' | 'adjacent' | 'permanent' | 'attack' | 'magic' | 'bash' | 'pierce' | 'tireless';
 
 /** The common, serializable dictionary used by active and triggered actions. */
 export interface CardAction {
@@ -39,7 +39,7 @@ export type ContinuousEffect =
   | { condition: 'deployed'; kind: 'ability-bonus'; ability: 'move' | 'attack' | 'magic'; left?: number; right?: number; label: string };
 
 /** A one-shot event and the state change resolved each time it occurs. */
-export type EventCondition = 'start' | 'end' | 'opponentStart' | 'opponentEnd' | 'deploy' | 'bashAttack' | 'bashDefense' | 'bashRetreat' | 'bashResolved' | 'bash' | 'magicUsed' | 'stunUsed' | 'successfulAttack' | 'movementUsed' | 'death';
+export type EventCondition = 'start' | 'end' | 'opponentStart' | 'opponentEnd' | 'deploy' | 'bashAttack' | 'bashDefense' | 'bashRetreat' | 'bashResolved' | 'bash' | 'magicUsed' | 'stunUsed' | 'attackResolved' | 'successfulAttack' | 'movementUsed' | 'death';
 export type EventResolution =
   CardAction;
 export interface TriggerCondition { kind?: ActionKind; type?: readonly ActionQualifier[]; signal?: EventCondition; subject?: 'self' | 'ally' | 'enemy'; }
@@ -72,122 +72,492 @@ export function hasPassive(card: Pick<TroopSeed, 'passives'> | undefined, passiv
   return card?.passives?.includes(passive) ?? false;
 }
 
-interface ActionOptions {
-  fly?: number;
-  attack?: readonly [range: number, damage?: number];
-  attackType?: readonly ActionQualifier[];
-  magicType?: readonly ActionQualifier[];
-  defense?: readonly [block: number, range: number];
-  magicDefense?: readonly [block: number, range: number];
-  magic?: readonly [damage: number, range: number];
-  cannon?: readonly [damage: number, range: number];
-  /** M🐏N: gore M physical damage at range N after moving to the target hex. */
-  gore?: readonly [damage: number, range: number];
-  bomb?: readonly [damage: number, range: number];
-  /** M🫸N: push M hexes, select a target up to N hexes away. */
-  push?: readonly [distance: number, range: number];
-  /** M🫷N: pull M hexes, select a target up to N hexes away. */
-  pull?: readonly [distance: number, range: number];
-  /** N🚫M: stun for N turns at range M. */
-  stun?: readonly [turns: number, range: number];
-  /** M❤️N: mend M health at distance N. */
-  mending?: readonly [amount: number, range: number];
-  /** M🔮N: temporarily raise an active's left/right numbers. */
-  upgrade?: { left?: number; right?: number; range: number };
-}
-
-function actions(move = 1, options: ActionOptions = {}): readonly TroopAction[] {
-  const result: TroopAction[] = move > 0 ? [{ kind: 'move', range: move }] : [];
-  if (options.fly) result.push({ kind: 'fly', range: options.fly });
-  if (options.attack) result.push({ kind: 'ranged', ...(options.attack[1] === undefined ? {} : { amount: options.attack[1] }), range: options.attack[0], ...(options.attackType ? { type: options.attackType } : {}) });
-  if (options.defense) result.push({ kind: 'defense', amount: options.defense[0], range: options.defense[1] });
-  if (options.magicDefense) result.push({ kind: 'defense', amount: options.magicDefense[0], range: options.magicDefense[1], type: ['magic'] });
-  if (options.magic) result.push({ kind: 'fire', amount: options.magic[0], range: options.magic[1], ...(options.magicType ? { type: options.magicType } : {}) });
-  if (options.cannon) result.push({ kind: 'cannon', amount: options.cannon[0], range: options.cannon[1] });
-  if (options.gore) result.push({ kind: 'gore', amount: options.gore[0], range: options.gore[1] });
-  if (options.bomb) result.push({ kind: 'bomb', amount: options.bomb[0], range: options.bomb[1] });
-  if (options.push) result.push({ kind: 'push', amount: options.push[0], range: options.push[1] });
-  if (options.pull) result.push({ kind: 'pull', amount: options.pull[0], range: options.pull[1] });
-  if (options.stun) result.push({ kind: 'stun', amount: options.stun[0], range: options.stun[1] });
-  if (options.mending) result.push({ kind: 'mending', amount: options.mending[0], range: options.mending[1] });
-  if (options.upgrade) result.push({ kind: 'upgrade', amount: [options.upgrade.left ?? 0, options.upgrade.right ?? 0], range: options.upgrade.range });
-  return result;
-}
-
-export const troopSeeds: readonly TroopSeed[] = [
+/*
+ * Declarative catalogue draft.
+ *
+ * This deliberately uses the proposed human-readable card language before the
+ * parser and engine adapter exist. The catalogue is therefore documentation of
+ * the target format for now, rather than executable engine data.
+ */
+const cardSources: readonly CardSource[] = [
   // Catalogue cards are side-neutral and may be chosen by either player.
   // Queen Bee is a fragile ranged hero.
-  { id: 'queen-bee', name: 'Queen Bee', role: 'hero', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(2, { attack: [4, 3] }) },
-  { id: 'squirrel-king', name: 'Squirrel King', role: 'hero', baseHealth: 4, deploymentRegions: ['starting'], actions: actions(1, { magic: [1, 3] }), triggers: [{ id: 'kindle', condition: { kind: 'fire', subject: 'self' }, action: { kind: 'heal', amount: 1, range: 0 } }], passiveDescription: '🔥: +1❤️', ruleDescription: 'Kindle: heals 1 permanent damage each time it uses Magic.' },
-  { id: 'tiger-queen', name: 'Tiger Queen', role: 'hero', baseHealth: 5, deploymentRegions: ['starting'], actions: actions(3)},
-  { id: 'wandering-monarch', name: 'Wandering Monarch', role: 'hero', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(1, { push: [1, 2], defense: [2, 1] }), triggers: [{ id: 'end-stride', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'move', range: 1 } }], passiveDescription: 'End: 🥾1', ruleDescription: 'End stride: at the end of your turn, you may move this hero 1 hex or decline and finish the turn.' },
-  { id: 'mole-artificer', name: 'Mole Artificer', role: 'hero', baseHealth: 4, deploymentRegions: ['starting'], actions: actions(1, { bomb: [3, 2], magic: [1, 2], magicType: ['pierce'] }) },
-  { id: 'stag-guardian', name: 'Stag Guardian', role: 'hero', baseHealth: 4, deploymentRegions: ['starting'], actions: actions(1, { defense: [2, 2] }), triggers: [{ id: 'renewal', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'heal', amount: 1, range: 0 } }], passiveDescription: 'Start: +1❤️', ruleDescription: 'Renewal: at the start of your turn, heals 1 permanent damage.' },
-  { id: 'raven-prince', name: 'Raven Prince', role: 'hero', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 3 }), triggers: [{ id: 'dusk-stun', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'stun', amount: 1, range: 1 } }], passiveDescription: 'End: 1🚫1', ruleDescription: 'Dusk stun: at the end of your turn, choose an enemy troop within 1. It becomes inactive for 1 turn and loses its shields and modifiers.' },
-  { id: 'boar-warlord', name: 'Boar Warlord', role: 'hero', baseHealth: 4, deploymentRegions: ['starting'], actions: actions(1), triggers: [{ id: 'start-stride', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'move', range: 1 } }, { id: 'battle-hardened', condition: { signal: 'bash', subject: 'self' }, action: { kind: 'modifier', amount: [1,1], range: 0, type: ['permanent'] } }], passiveDescription: 'Start: 🥾1\n⚔️: +1 ~+1~', ruleDescription: 'Start stride: at the start of your turn, you may move this hero 1 hex or decline. Battle-hardened: each time it enters a bash, it permanently gains +1 physical and +1 magic modifier.' },
-  { id: 'tortoise-emperor', name: 'Tortoise Emperor', role: 'hero', baseHealth: 7, deploymentRegions: ['starting'], actions: actions(0), triggers: [{ id: 'imperial-shelter', condition: { kind: 'phase', type: ['end'], subject: 'self' }, action: { kind: 'defense', amount: 1, range: 1, type: ['adjacent'] } }], passiveDescription: 'End: adj +1🛡️', ruleDescription: 'Imperial shelter: at the end of your turn, each adjacent friendly troop gains 1 shield. The shield follows that troop, and is consumed by a physical attack over it or by that troop’s true action.' },
+  {
+    id: 'queen-bee',
+    role: 'hero',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate',
+    actions: 'move 2, 3 bow 4'
+  },
+  {
+    id: 'squirrel-king',
+    role: 'hero',
+    baseHealth: 4,
+    deploymentRegions: 'starting',
+    actions: '1 fire 3',
+    triggers: 'fire : +1 life',
 
-  { id: 'thunder-toad', name: 'Thunder Toad', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(1, { stun: [1, 1] }), triggers: [{ id: 'thunder-charge', condition: { signal: 'stunUsed', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: 'Stun: +1', ruleDescription: 'Thunder charge: after it uses Stun, it permanently gains +1 physical modifier.' },
-  { id: 'bellwing-crane', name: 'Bellwing Crane', role: 'troop', baseHealth: 2, deploymentRegions: ['front'], actions: actions(0, { fly: 2, stun: [1, 2] }), triggers: [{ id: 'bellwing-stun', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'stun', amount: 1, range: 1 } }], passiveDescription: 'Start: 1🚫1', ruleDescription: 'Bellwing call: at the start of its turn, choose an enemy troop within 1 to stun for 1 turn.' },
-  { id: 'frosthorn-yak', name: 'Frosthorn Yak', role: 'troop', baseHealth: 4, deploymentRegions: ['starting', 'intermediate'], actions: actions(0, { stun: [2, 1] }), triggers: [{ id: 'frosthorn-call', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'pull', amount: 2, range: 3 } }], passiveDescription: 'Start: 2🫷3', ruleDescription: 'Frosthorn call: at the start of its turn, choose a troop within 3 and pull it 2 hexes toward this troop.' },
-  { id: 'duelist-scorpion', name: 'Duelist Scorpion', role: 'troop', baseHealth: 2, deploymentRegions: ['front'], actions: actions(2, { stun: [1, 1] }), triggers: [{ id: 'duelist-deploy', condition: { signal: 'deploy', subject: 'self' }, action: { kind: 'modifier', amount: [3, 3], range: 0, type: ['permanent'] } }], passiveDescription: 'Deploy: +3 ~+3~', ruleDescription: 'Duelist: when deployed, permanently gains +3 physical and +3 magic modifier.' },
-  { id: 'needle-peacock', name: 'Needle Peacock', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 2, attack: [2, 1], attackType: ['pierce'] }), triggers: [{ id: 'needle-sting', condition: { signal: 'successfulAttack', subject: 'self' }, action: { kind: 'stun', amount: 1, range: 0 } }], passiveDescription: 'Hits: 1🚫', ruleDescription: 'Needle sting: when its attack damages an enemy, that target is stunned for 1 turn.' },
-  { id: 'iron-bell-golem', name: 'Iron Bell Golem', role: 'troop', baseHealth: 4, deploymentRegions: ['intermediate'], actions: actions(1), passives: ['titanium'], triggers: [{ id: 'iron-bell-deploy', condition: { signal: 'deploy', subject: 'self' }, action: { kind: 'modifier', amount: [0, -3], range: 0, type: ['permanent'] } }], passiveDescription: 'Deploy: ~-3~', ruleDescription: 'On deployment, permanently receives -3 magic modifier.' },
-  { id: 'merino-ram', name: 'Merino Ram', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(0, { gore: [2, 3] }) },
-  { id: 'prism-moth', name: 'Prism Moth', role: 'troop', baseHealth: 1, deploymentRegions: ['starting'], actions: actions(0, { fly: 2, attack: [1, 2], attackType: ['instant'] }), triggers: [{ id: 'prismatic-bash', condition: { signal: 'bash', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent', 'magic'] } }], passiveDescription: '⚔️: ~+1~', ruleDescription: 'Prismatic bash: after it is involved in a bash, it permanently gains +1 magic modifier.' },
-  { id: 'warding-bat', name: 'Warding Bat', role: 'troop', baseHealth: 1, deploymentRegions: ['front'], actions: actions(0, { fly: 2 }), triggers: [{ id: 'dawn-fire', condition: { kind: 'phase', type: ['start'], subject: 'self' }, action: { kind: 'fire', amount: 1, range: 1, type: ['instant'] } }], passiveDescription: 'Start: 1F🔥1', ruleDescription: 'Dawn fire: at the start of its turn, choose a hex within 1 for 1 immediate magic damage.' },
-  { id: 'arcane-viper', name: 'Arcane Viper', role: 'troop', baseHealth: 2, deploymentRegions: ['starting', 'intermediate'], actions: actions(1, { magic: [2, 2] }), triggers: [{ id: 'arcane-resonance', condition: { signal: 'magicUsed', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent', 'magic'] } }], passiveDescription: '🔥: ~+1~', ruleDescription: 'Arcane resonance: after it uses Magic, it permanently gains +1 magic modifier.' },
-  { id: 'komodo-dragon', name: 'Komodo Dragon', role: 'troop', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(1), selfDefense: 3, selfMagicDefense: 3},
-  { id: 'ironhide-boar-pup', name: 'Ironhide Boar Pup', role: 'troop', baseHealth: 1, deploymentRegions: ['starting'], actions: actions(1, { gore: [1, 3] }), triggers: [{ id: 'gore-hardened', condition: { signal: 'successfulAttack', kind: 'gore', subject: 'self' }, action: { kind: 'modifier', amount: [1, 1], range: 0, type: ['permanent'] } }], passiveDescription: 'hits: +1 ~+1~', ruleDescription: 'Gore-hardened: when its Gore damages an enemy, it permanently gains +1 physical modifier and +1 magic modifier.' },
-  { id: 'needle-mantis', name: 'Needle Mantis', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 2, attack: [3, 1], attackType: ['pierce'] }) },
-  { id: 'deep-ocean-octopus', name: 'Deep Ocean Octopus', role: 'troop', baseHealth: 5, deploymentRegions: ['starting', 'intermediate'], actions: actions(0, { pull: [3, 3] }), triggers: [{ id: 'tentacle-grip', condition: { signal: 'bash', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: '⚔️: +1', ruleDescription: 'Tentacle grip: after it is involved in a bash, it permanently gains +1 physical modifier.' },
-  { id: 'thornback-archer', name: 'Thornback Archer', role: 'troop', baseHealth: 3, deploymentRegions: ['front'], actions: actions(1, { attack: [2, 2], attackType: ['pierce'] }) },
-  { id: 'spellshield-beetle', name: 'Spellshield Beetle', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(1), passives: ['obsidian'], triggers: [{ id: 'carapace', condition: { signal: 'bash', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: '⚔️: +1', ruleDescription: 'Carapace: after it is involved in a bash, it permanently gains +1 physical modifier.' },
-  { id: 'obsidian-lizard', name: 'Obsidian Lizard', role: 'troop', baseHealth: 2, deploymentRegions: ['front'], actions: actions(1), selfDefense: 2, passives: ['obsidian'] },
-  { id: 'battle-magpie', name: 'Battle Magpie', role: 'troop', baseHealth: 1, deploymentRegions: ['front'], actions: actions(0, { fly: 2, attack: [2, 1], attackType: ['pierce'] }), triggers: [{ id: 'magpie-strike', condition: { signal: 'successfulAttack', subject: 'self' }, action: { kind: 'modifier', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: 'hits: +1', ruleDescription: 'Battle magpie: after it damages an enemy with an attack, it permanently gains +1 physical modifier.' },
+  },
+  {
+    id: 'tiger-queen',
+    role: 'hero',
+    baseHealth: 5,
+    deploymentRegions: 'starting',
+    actions: 'move 3'
+  },
+  {
+    id: 'wandering-monarch',
+    role: 'hero',
+    baseHealth: 3,
+    deploymentRegions: 'starting',
+    actions: '1 push 2, 2 shield 1',
+    triggers: 'end : move 1'
+  },
+  {
+    id: 'mole-artificer',
+    role: 'hero',
+    baseHealth: 4,
+    deploymentRegions: 'starting',
+    actions: '3 bomb 2, 1 P.fire 2',
 
-  { id: 'bramble-empress', name: 'Bramble Empress', role: 'troop', baseHealth: 1, deploymentRegions: ['starting', 'intermediate'], actions: actions(1, { push: [3, 1] }) },
-  { id: 'ember-salamander', name: 'Ember Salamander', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(1, { magic: [3, 2] }) },
-  { id: 'bombardier-beetle', name: 'Bombardier Beetle', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(1, { bomb: [2, 2] }) },
-  { id: 'powder-newt', name: 'Powder Newt', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(2, { bomb: [1, 3] }) },
-  { id: 'firefly-sapper', name: 'Firefly Sapper', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 2, bomb: [1, 2], magic: [1, 2] }) },
-  { id: 'moss-tortoise', name: 'Moss Tortoise', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(1, { defense: [2, 2] }) },
-  { id: 'steppe-lynx', name: 'Steppe Lynx', role: 'troop', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(1, { attack: [1] }) },
-  { id: 'reed-archer', name: 'Reed Archer', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(0, { attack: [4, 1] }), triggers: [{ id: 'sharpen', condition: { signal: 'successfulAttack', subject: 'self' }, action: { kind: 'upgrade', amount: [1, 0], range: 0, type: ['permanent', 'attack'] } }], passiveDescription: 'hits: +1🏹', ruleDescription: 'Sharpen: after its ranged attack successfully inflicts damage, it permanently gains a stackable magenta +1 ranged damage.' },
-  { id: 'crown-breaker', name: 'Crown Breaker', role: 'troop', baseHealth: 3, deploymentRegions: ['starting', 'intermediate'], actions: actions(2), continuousEffects: [{ condition: 'bash-attacker-vs-hero', kind: 'combat-modifier', value: 2, label: 'Crown Breaker' }], passiveDescription: '+2 if ⚔️👑', ruleDescription: 'Regicide: gains +2 combat modifier while bashing a hero as the attacker.' },
-  { id: 'marching-giant', name: 'Marching Giant', role: 'troop', baseHealth: 5, deploymentRegions: ['starting'], actions: actions(1), triggers: [{ id: 'attrition', condition: { kind: 'move', subject: 'self' }, action: { kind: 'damage', amount: 1, range: 0, type: ['permanent'] } }], passiveDescription: '🥾: -1❤️', ruleDescription: 'Attrition: suffers 1 permanent damage each time it completes a Move action.' },
-  { id: 'phoenix-moth', name: 'Phoenix Moth', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(0, { fly: 2 }), triggers: [{ id: 'death-burst', condition: { signal: 'death', subject: 'self' }, action: { kind: 'ranged', amount: 3, range: 2 } }], passiveDescription: '💀: 3🏹2', ruleDescription: 'Death burst: when this troop dies, choose an enemy within 2 hexes of its death hex to receive 3 physical damage.' },
-  { id: 'pine-processionary', name: 'Pine Processionary', role: 'troop', baseHealth: 1, deploymentRegions: ['starting'], actions: actions(2), triggers: [{ id: 'revive', condition: { signal: 'death', subject: 'self' }, action: { kind: 'revive', range: 0 } }], passiveDescription: '💀: 👼', ruleDescription: 'Revive: when this troop dies, choose one of your defeated troops and make it available to deploy again. If none are defeated, nothing happens.' },
-  { id: 'canyon-ibex', name: 'Canyon Ibex', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(3), continuousEffects: [{ condition: 'bash-attacker', kind: 'combat-modifier', value: 2, label: 'Canyon Ibex' }], passiveDescription: '+2 if ⚔️', ruleDescription: 'Charge: gains +2 combat modifier while it is the attacker in a bash.' },
-  { id: 'marsh-badger', name: 'Marsh Badger', role: 'troop', baseHealth: 4, deploymentRegions: ['starting', 'intermediate'], actions: actions(), continuousEffects: [{ condition: 'shielded', kind: 'combat-modifier', value: -1, label: 'Marsh Badger' }], passiveDescription: '-1 if 🛡️', ruleDescription: 'Encumbered: loses 1 combat modifier while shielded.' },
-  { id: 'dune-scorpion', name: 'Dune Scorpion', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(1, { attack: [3] }), deploymentRule: 'enemy-region' },
-  { id: 'snowy-owl', name: 'Snowy Owl', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(2, { attack: [3] }) },
-  { id: 'cave-viper', name: 'Cave Viper', role: 'troop', baseHealth: 2, deploymentRegions: ['front'], actions: actions(0, { magic: [2, 3] }) },
-  { id: 'river-otter', name: 'River Otter', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(), continuousEffects: [{ condition: 'shielded-by-ally', kind: 'combat-modifier', value: 1, label: 'River Otter' }], passiveDescription: '+1 if 🛡️', ruleDescription: 'Support: gains +1 combat modifier while another unit shields it.' },
-  { id: 'coastal-heron', name: 'Coastal Heron', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: actions(1, { magic: [2, 3] }) },
-  { id: 'desert-fox', name: 'Desert Fox', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(2, { magic: [3, 1] }) },
-  { id: 'iron-armadillo', name: 'Iron Armadillo', role: 'troop', baseHealth: 1, deploymentRegions: ['starting', 'intermediate'], actions: actions(1, { defense: [3, 1] }) },
-  { id: 'volcanic-gecko', name: 'Volcanic Gecko', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(1, { magic: [4, 1] }) },
-  { id: 'highland-hawk', name: 'Highland Hawk', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(1, { attack: [2] }) },
-  { id: 'ironscale-rhino', name: 'Ironscale Rhino', role: 'troop', baseHealth: 6, deploymentRegions: ['starting'], actions: actions(1, { defense: [3, 2] }), deploymentRule: 'enemy-region' },
-  { id: 'sahel-porcupine', name: 'Sahel Porcupine', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(2, { attack: [1, 1] }), triggers: [{ id: 'momentum', condition: { signal: 'bashAttack', subject: 'self' }, action: { kind: 'upgrade', amount: [1, 1], range: 0, type: ['permanent', 'attack'] } }], passiveDescription: '⚔️: +1🏹+1', ruleDescription: 'Momentum: when this troop starts a bash, it permanently gains a stackable magenta +1 ranged damage and +1 range upgrade.' },
-  { id: 'alps-lone-wolf', name: 'Alps Lone Wolf', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: actions(2), continuousEffects: [{ condition: 'injured', kind: 'combat-modifier', value: 2, label: 'Alps Lone Wolf' }], passiveDescription: '+2 if 🩸', ruleDescription: 'Tenacity: gains +2 combat modifier while injured.' },
-  { id: 'canyon-hawk', name: 'Canyon Hawk', role: 'troop', baseHealth: 3, deploymentRegions: ['front'], actions: actions(0, { fly: 2 }), passives: ['steady'] },
-  { id: 'cinder-heron', name: 'Cinder Heron, Rice Farmer', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: actions(0, { fly: 3 }) },
-  { id: 'walnut-crab', name: 'Walnut Crab', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(1, { cannon: [2, 3], defense: [2, 0] }) },
-  { id: 'coconut-crab', name: 'Coconut Crab', role: 'troop', baseHealth: 1, deploymentRegions: ['starting'], actions: actions(1, { cannon: [3, 3] }) },
-  { id: 'seaweed-crab', name: 'Seaweed Crab', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(1, { cannon: [2, 4] }) },
-  { id: 'reed-warden', name: 'Reed Warden', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(1, { push: [2, 1] }), selfDefense: 2 },
-  { id: 'bramble-scout', name: 'Bramble Scout', role: 'troop', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(2, { push: [1, 2] }) },
+  },
+  {
+    id: 'stag-guardian',
+    role: 'hero',
+    baseHealth: 4,
+    deploymentRegions: 'starting',
+    actions: '2 shield 2',
+    triggers: 'start : +1 life',
 
-  { id: 'spring-temple', name: 'Spring Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['starting', 'intermediate'], actions: actions(0, { mending: [1, 3] }) },
-  { id: 'oracle-temple', name: 'Oracle Temple', role: 'temple', baseHealth: 2, deploymentRegions: ['intermediate'], actions: actions(0, { upgrade: { left: 1, right: 0, range: 1 } }) },
-  { id: 'water-temple', name: 'Water Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['front'], actions: actions(0, { upgrade: { left: 1, right: 1, range: 2 } }) },
-  { id: 'war-temple', name: 'War Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], actions: actions(0), continuousEffects: [{ condition: 'in-bash', kind: 'combat-modifier', value: 1, label: 'War Temple', scope: 'allies' }], passiveDescription: '+1 if ⚔️', ruleDescription: 'War aura: your units gain +1 combat modifier while in a bash.' },
-  { id: 'ranged-power-temple', name: 'Ranged Power Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'attack', left: 1, label: 'Ranged Power Temple' }], passiveDescription: '+1🏹', ruleDescription: 'Ranged power aura: your units gain +1 ranged damage while this temple is deployed.' },
-  { id: 'magic-power-temple', name: 'Magic Power Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'magic', left: 1, label: 'Magic Power Temple' }], passiveDescription: '+1🔥', ruleDescription: 'Magic power aura: your units gain +1 magic damage while this temple is deployed.' },
-  { id: 'magic-range-temple', name: 'Magic Range Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'magic', right: 1, label: 'Magic Range Temple' }], passiveDescription: '🔥+1', ruleDescription: 'Magic range aura: your units gain +1 magic range while this temple is deployed.' },
-  { id: 'ranged-range-temple', name: 'Ranged Range Temple', role: 'temple', baseHealth: 3, deploymentRegions: ['intermediate'], deploymentRule: 'enemy-region', actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'attack', right: 1, label: 'Ranged Range Temple' }], passiveDescription: '🏹+1', ruleDescription: 'Ranged range aura: your units gain +1 ranged range while this temple is deployed.' },
-  { id: 'temple-last-bell', name: 'Temple of the Last Bell', role: 'temple', baseHealth: 2, deploymentRegions: ['starting', 'intermediate'], actions: actions(0), triggers: [{ id: 'last-bell', condition: { signal: 'death', subject: 'self' }, action: { kind: 'ranged', amount: 3, range: 3, type: ['instant'] } }], passiveDescription: '💀: 3F🏹3', ruleDescription: 'Last bell: when this temple dies, choose a hex within 3 twice. Each chosen hex immediately receives 3 physical ranged damage and may be chosen more than once.' },
-  { id: 'temple-marches', name: 'Temple of Marches', role: 'temple', baseHealth: 2, deploymentRegions: ['front'], actions: actions(0), continuousEffects: [{ condition: 'deployed', kind: 'ability-bonus', ability: 'move', right: 1, label: 'Temple of Marches' }], passiveDescription: '🥾+1', ruleDescription: 'March aura: your units gain +1 Move range while this temple is deployed.' },
+  },
+  {
+    id: 'raven-prince',
+    role: 'hero',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate',
+    actions: 'fly 3',
+    triggers: 'end : 1 stun 1'
+  },
+  {
+    id: 'boar-warlord',
+    role: 'hero',
+    baseHealth: 4,
+    deploymentRegions: 'starting',
+    triggers: 'start : move 1, bash : 1 mod 1'
+  },
+  {
+    id: 'tortoise-emperor',
+    role: 'hero',
+    baseHealth: 7,
+    deploymentRegions: 'starting',
+    actions: 'move 0',
+    triggers: 'end : 1 mod 0 all-adj-friend'
+  },
+  {
+    id: 'thunder-toad',
+    baseHealth: 3,
+    deploymentRegions: 'starting',
+    actions: '1 stun 1',
+    triggers: 'stun : 1 mod 0'
+  },
+  {
+    id: 'bellwing-crane',
+    baseHealth: 2,
+    deploymentRegions: 'front',
+    actions: 'fly 2, 1 stun 2',
+    triggers: 'start : 1 stun 1'
+  },
+  {
+    id: 'frosthorn-yak',
+    baseHealth: 4,
+    deploymentRegions: 'starting intermediate',
+    actions: 'move 0, 2 stun 1',
+    triggers: 'start : 2 pull 3'
+  },
+  {
+    id: 'duelist-scorpion',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: 'move 2, 1 stun 1',
+    triggers: 'deploy any-hex-enemy : 3 mod 3'
+  },
+  {
+    id: 'needle-peacock',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate',
+    actions: 'fly 2, 1 P.bow 3',
+    triggers: 'wounds : 1 stun 0'
+  },
+  {
+    id: 'iron-bell-golem',
+    baseHealth: 4,
+    deploymentRegions: 'intermediate',
+    passives: 'titanium',
+    triggers: 'deploy : 0 mod -3'
+  },
+  {
+    id: 'merino-ram',
+    baseHealth: 3,
+    deploymentRegions: 'starting',
+    actions: 'move 0, 3 gore 3'
+  },
+  {
+    id: 'prism-moth',
+    baseHealth: 1,
+    deploymentRegions: 'starting',
+    actions: 'fly 2, 1 F.bow 2',
+    triggers: 'is-bash-by : 0 mod 1'
+  },
+  {
+    id: 'warding-bat',
+    baseHealth: 1,
+    deploymentRegions: 'front',
+    actions: 'fly 2',
+    triggers: 'start : 1 F.fire 1'
+  },
+  {
+    id: 'arcane-viper',
+    baseHealth: 2,
+    deploymentRegions: 'starting intermediate',
+    actions: '2 fire 2',
+    triggers: 'fire : 0 mod 1'
+  },
+  {
+    id: 'komodo-dragon',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate',
+    actions: '3 shield 0, 3 mshield 0'
+  },
+  {
+    id: 'ironhide-boar-pup',
+    baseHealth: 1,
+    deploymentRegions: 'starting',
+    actions: '1 gore 3',
+    triggers: 'hit : 1 mod 1'
+  },
+  {
+    id: 'needle-mantis',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: 'fly 2, 1 P.bow 3'
+  },
+  {
+    id: 'deep-ocean-octopus',
+    baseHealth: 5,
+    deploymentRegions: 'starting intermediate',
+    actions: 'move 0, 3 pull 3',
+    triggers: 'is-bash-by : 1 mod 0'
+  },
+  {
+    id: 'thornback-archer',
+    baseHealth: 3,
+    deploymentRegions: 'front',
+    actions: '2 P.bow 2'
+  },
+  {
+    id: 'spellshield-beetle',
+    baseHealth: 2,
+    deploymentRegions: 'starting',
+    passives: 'obsidian',
+    triggers: 'bash : 1 mod 0'
+  },
+  {
+    id: 'obsidian-lizard',
+    baseHealth: 2,
+    deploymentRegions: 'front',
+    actions: '2 shield 0',
+    passives: 'obsidian'
+  },
+  {
+    id: 'battle-magpie',
+    baseHealth: 1,
+    deploymentRegions: 'front',
+    actions: 'fly 2, 1 P.bow 2',
+    triggers: 'wound : 1 mod 0'
+  },
+  {
+    id: 'bramble-empress',
+    baseHealth: 1,
+    deploymentRegions: 'starting intermediate',
+    actions: '3 push 1, 1 pull 3'
+  },
+  {
+    id: 'ember-salamander',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: '3 fire 2'
+  },
+  {
+    id: 'bombardier-beetle',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: '2 bomb 2'
+  },
+  {
+    id: 'powder-newt',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate',
+    actions: 'move 2, 1 bomb 3'
+  },
+  {
+    id: 'firefly-sapper',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: 'fly 2, 1 bomb 2, 1 fire 2'
+  },
+  {
+    id: 'moss-tortoise',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate',
+    actions: '2 shield 2'
+  },
+  {
+    id: 'steppe-lynx',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate',
+    actions: '3 bow 1'
+  },
+  {
+    id: 'reed-archer',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate',
+    actions: '1 bow 4',
+    triggers: 'wound : +1 bow +1'
+  },
+  {
+    id: 'crown-breaker',
+    baseHealth: 3,
+    deploymentRegions: 'starting intermediate',
+    actions: 'move 2',
+    continuous: 'bash hero :: 2 mod 0'
+  },
+  {
+    id: 'marching-giant',
+    baseHealth: 5,
+    deploymentRegions: 'starting',
+    triggers: 'move : -1 mend 0'
+  },
+  {
+    id: 'phoenix-moth',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: 'fly 2',
+    triggers: 'die : 3 bow 2'
+  },
+  {
+    id: 'pine-processionary',
+    baseHealth: 1,
+    deploymentRegions: 'starting',
+    actions: 'move 2',
+    triggers: 'die : revive'
+  },
+  {
+    id: 'canyon-ibex',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate',
+    actions: 'move 3',
+    continuous: 'bash :: +2'
+  },
+  {
+    id: 'marsh-badger',
+    baseHealth: 5,
+    actions: 'move 2',
+    deploymentRegions: 'starting intermediate',
+    continuous: 'shielded :: -1 mod 0'
+  },
+  {
+    id: 'dune-scorpion',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate enemy',
+    actions: '1 bow 3'
+  },
+  {
+    id: 'snowy-owl',
+    baseHealth: 2,
+    deploymentRegions: 'starting',
+    actions: 'move 2, 1 bow 3'
+  },
+  {
+    id: 'cave-viper',
+    baseHealth: 2,
+    deploymentRegions: 'front',
+    actions: 'move 0, 2 fire 3'
+  },
+  {
+    id: 'river-otter',
+    baseHealth: 3,
+    deploymentRegions: 'starting',
+    continuous: 'deployed :: +1'
+
+  },
+  {
+    id: 'coastal-heron',
+    baseHealth: 1,
+    deploymentRegions: 'intermediate',
+    actions: '2 fire 3'
+  },
+  {
+    id: 'desert-fox',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: 'move 2, 3 fire 1'
+  },
+  {
+    id: 'iron-armadillo',
+    baseHealth: 1,
+    deploymentRegions: 'starting intermediate',
+    actions: '3 shield 1'
+  },
+  {
+    id: 'volcanic-gecko',
+    baseHealth: 2,
+    deploymentRegions: 'starting',
+    actions: '4 fire 1'
+  },
+  {
+    id: 'highland-hawk',
+    baseHealth: 2,
+    deploymentRegions: 'starting',
+    actions: '1 bow 2'
+  },
+  {
+    id: 'ironscale-rhino',
+    baseHealth: 6,
+    deploymentRegions: 'starting enemy',
+    actions: '3 shield 2'
+  },
+  {
+    id: 'sahel-porcupine',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: 'move 2, 1 bow 1',
+    triggers: 'self bash any : +1 bow +1'
+  },
+  {
+    id: 'alps-lone-wolf',
+    baseHealth: 3,
+    deploymentRegions: 'starting',
+    actions: 'move 2',
+    continuous: 'wounded :: +2'
+  },
+  {
+    id: 'canyon-hawk',
+    baseHealth: 3,
+    deploymentRegions: 'front',
+    actions: 'fly 2',
+    passives: 'steady'
+  },
+  {
+    id: 'cinder-heron',
+    name: 'Cinder Heron, Rice Farmer',
+    baseHealth: 2,
+    deploymentRegions: 'starting',
+    actions: 'fly 3'
+  },
+  {
+    id: 'walnut-crab',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: '2 cannon 3, 2 shield 0'
+  },
+  {
+    id: 'coconut-crab',
+    baseHealth: 1,
+    deploymentRegions: 'starting',
+    actions: '3 cannon 3'
+  },
+  {
+    id: 'seaweed-crab',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: '2 cannon 4'
+  },
+  {
+    id: 'reed-warden',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: '2 push 1, 2 shield 0'
+  },
+  {
+    id: 'bramble-scout',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: 'move 2, 1 push 2'
+  },
+  {
+    id: 'spring-temple',
+    role: 'temple',
+    baseHealth: 3,
+    deploymentRegions: 'starting intermediate',
+    actions: 'move 0, 1 mend 3'
+  },
+  {
+    id: 'oracle-temple',
+    role: 'temple',
+    baseHealth: 2,
+    deploymentRegions: 'intermediate',
+    actions: '1 upgrade 0 1'
+  },
+  {
+    id: 'water-temple',
+    role: 'temple',
+    baseHealth: 3,
+    deploymentRegions: 'front',
+    actions: '1 upgrade 1 2'
+  },
+  {
+    id: 'war-temple',
+    role: 'temple',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate',
+    continuous: 'any-friend bash any-enemy :: +1 mod 0 subject',
+  },
+  {
+    id: 'ranged-power-temple',
+    role: 'temple',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate enemy',
+    continuous:'deployed :: +1 bow +0 all-friend'
+  },
+  {
+    id: 'magic-power-temple',
+    role: 'temple',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate enemy',
+    continuous: 'deployed :: +1 fire +0 all-friend'
+  },
+  {
+    id: 'magic-range-temple',
+    role: 'temple',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate enemy',
+    continuous: 'deployed :: +0 fire +1 all-friend'
+  },
+  {
+    id: 'ranged-range-temple',
+    role: 'temple',
+    baseHealth: 3,
+    deploymentRegions: 'intermediate enemy',
+    continuous: 'deployed :: +0 bow +1 all-friend'
+  },
+  {
+    id: 'temple-last-bell',
+    name: 'Temple of the Last Bell',
+    role: 'temple',
+    baseHealth: 2,
+    deploymentRegions: 'starting intermediate',
+    triggers: 'dies : 3 F.bow 3 & 3 F.bow 3'
+  },
+  {
+    id: 'temple-marches',
+    name: 'Temple of Marches',
+    role: 'temple',
+    baseHealth: 2,
+    deploymentRegions: 'front',
+    continuous: 'deployed :: move +1 all-friend'
+  },
+
 ];
+
+export const troopSeeds: readonly TroopSeed[] = cardSources.map(parseCard);
+import { parseCard, type CardSource } from './card-parser.js';

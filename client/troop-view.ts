@@ -50,6 +50,8 @@ export interface Troop {
   upgrades?: Array<{ ability?: UpgradableAbility; left?: number; right?: number; sourceUnitId?: string }>;
   coordinate?: Coordinate;
   permanentDamage: number;
+  maxLifeBonus?: number;
+  inactive?: boolean;
   defeated: boolean;
 }
 
@@ -63,6 +65,8 @@ export function createTroopView(cardId: string, owner: Player, unit?: ServerUnit
     owner,
     coordinate: unit?.coordinate,
     permanentDamage: unit?.permanentDamage ?? 0,
+    maxLifeBonus: unit?.maxLifeBonus ?? 0,
+    inactive: unit?.inactive,
     rangedDamageBonus: unit?.rangedDamageBonus ?? 0,
     rangedRangeBonus: unit?.rangedRangeBonus ?? 0,
     upgrades: unit?.upgrades,
@@ -91,7 +95,7 @@ const passivePresentations: Record<PassiveKind, PassivePresentation> = {
   },
   titanium: {
     compact: 'Titanium',
-    rule: 'Titanium: immune to physical Attack and Gore damage.'
+    rule: 'Titanium: immune to incoming physical Attack, Gore, and Bash damage; it still deals Bash damage normally.'
   },
   steady: {
     compact: 'Steady',
@@ -157,12 +161,16 @@ export function hasDeploymentTarget(match: ServerMatchState, owner: Player, troo
 }
 
 export function healthOf(troop: Troop): number {
-  return Math.max(0, troop.baseHealth - troop.permanentDamage);
+  return Math.max(0, maximumHealthOf(troop) - troop.permanentDamage);
+}
+
+export function maximumHealthOf(troop: Troop): number {
+  return Math.max(0, troop.baseHealth + (troop.maxLifeBonus ?? 0));
 }
 
 export function healthDescription(troop: Troop): string {
   const health = healthOf(troop);
-  return `${health} ♥ ${troop.baseHealth}`;
+  return `${health} ♥ ${maximumHealthOf(troop)}`;
 }
 
 export function rangedDamage(troop: Troop, attack: AttackAction): number {
@@ -216,12 +224,16 @@ export function actionOfType(troop: Troop, type: UpgradableAbility): LegacyActio
 
 function attackPrefix(action: LegacyActionView): string {
   const qualifiers: readonly ActionQualifier[] = action.qualifiers ?? [];
-  return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}`;
+  return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}${qualifiers.includes('tireless') ? 'T' : ''}`;
 }
 
 function magicPrefix(action: LegacyActionView): string {
   const qualifiers: readonly ActionQualifier[] = action.qualifiers ?? [];
-  return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}`;
+  return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}${qualifiers.includes('tireless') ? 'T' : ''}`;
+}
+
+function tirelessPrefix(action: LegacyActionView): string {
+  return action.qualifiers?.includes('tireless') ? 'T' : '';
 }
 
 /** A compact summary line is a magic shield only when explicitly marked with
@@ -315,21 +327,21 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
   const selfBonus = bonus('self-defense');
 
   if (includeSelfBlock || (troop.selfDefense ?? 1) + selfBonus.left > 1) abilities.push({ text: `${(troop.selfDefense ?? 1) + selfBonus.left} 🛡️`, action: 'self-defense', upgraded: Boolean(selfBonus.left) });
-  if (move) { const value = bonus('move'); const aura = staticAuraBonus(troop, 'move'); if (move.maxDistance + value.right + aura.right > 1 || revealMoveOne) abilities.push({ text: `🥾 ${move.maxDistance + value.right + aura.right}`, action: 'move', upgraded: Boolean(value.right), staticRight: Boolean(aura.right) }); }
+  if (move) { const value = bonus('move'); const aura = staticAuraBonus(troop, 'move'); if (move.maxDistance + value.right + aura.right > 1 || revealMoveOne) abilities.push({ text: `${tirelessPrefix(move)}🥾 ${move.maxDistance + value.right + aura.right}`, action: 'move', upgraded: Boolean(value.right), staticRight: Boolean(aura.right) }); }
   else if (!fly && troop.role !== 'temple') abilities.push({ text: '🥾 0', action: 'move' });
-  if (fly) { const value = bonus('fly'); abilities.push({ text: `🪽 ${fly.maxDistance + value.right}`, action: 'fly', upgraded: Boolean(value.right) }); }
+  if (fly) { const value = bonus('fly'); abilities.push({ text: `${tirelessPrefix(fly)}🪽 ${fly.maxDistance + value.right}`, action: 'fly', upgraded: Boolean(value.right) }); }
   if (attack) { const value = bonus('attack'); const aura = staticAuraBonus(troop, 'attack'); const permanent = permanentUpgradeBonus(troop, 'attack'); abilities.push({ text: `${rangedDamage(troop, attack) + value.left + aura.left} ${attackPrefix(attack)}🏹 ${rangedRange(troop, attack) + value.right + aura.right}`, action: 'attack', upgraded: Boolean(value.left || value.right), staticLeft: Boolean(aura.left || permanent.left), staticRight: Boolean(aura.right || permanent.right) }); }
-  if (defense) { const value = bonus('defense'); abilities.push({ text: `${defense.block + value.left} 🛡️ ${defense.range + value.right}`, action: 'defense', upgraded: Boolean(value.left || value.right) }); }
-  if (magicDefense) { const value = bonus('magic-defense'); abilities.push({ text: `${magicDefense.block + value.left} 🛡️ ${magicDefense.range + value.right}`, action: 'magic-defense', upgraded: Boolean(value.left || value.right) }); }
+  if (defense) { const value = bonus('defense'); abilities.push({ text: `${defense.block + value.left} ${tirelessPrefix(defense)}🛡️ ${defense.range + value.right}`, action: 'defense', upgraded: Boolean(value.left || value.right) }); }
+  if (magicDefense) { const value = bonus('magic-defense'); abilities.push({ text: `${magicDefense.block + value.left} ${tirelessPrefix(magicDefense)}🛡️ ${magicDefense.range + value.right}`, action: 'magic-defense', upgraded: Boolean(value.left || value.right) }); }
   if ((troop.selfMagicDefense ?? 0) + bonus('self-magic-defense').left > 0) abilities.push({ text: `${(troop.selfMagicDefense ?? 0) + bonus('self-magic-defense').left} 🛡️`, action: 'self-magic-defense', upgraded: Boolean(bonus('self-magic-defense').left) });
   if (magic) { const value = bonus('magic'); const aura = staticAuraBonus(troop, 'magic'); const permanent = permanentUpgradeBonus(troop, 'magic'); abilities.push({ text: `${magic.damage + permanent.left + value.left + aura.left} ${magicPrefix(magic)}🔥 ${magic.range + permanent.right + value.right + aura.right}`, action: 'magic', upgraded: Boolean(value.left || value.right), staticLeft: Boolean(aura.left || permanent.left), staticRight: Boolean(aura.right || permanent.right) }); }
-  if (cannon) { const value = bonus('cannon'); abilities.push({ text: `${cannon.damage + value.left} 🧨 ${cannon.range + value.right}`, action: 'cannon', upgraded: Boolean(value.left || value.right) }); }
-  if (gore) { const value = bonus('gore'); abilities.push({ text: `${gore.damage + value.left} ${goreIcon} ${gore.range + value.right}`, action: 'gore', upgraded: Boolean(value.left || value.right) }); }
-  if (bomb) { const value = bonus('bomb'); abilities.push({ text: `${bomb.damage + value.left} 💣 ${bomb.range + value.right}`, action: 'bomb', upgraded: Boolean(value.left || value.right) }); }
-  if (push) { const value = bonus('push'); abilities.push({ text: `${push.maxDistance + value.left}${pushIcon}${push.range + value.right}`, action: 'push', upgraded: Boolean(value.left || value.right) }); }
-  if (pull) { const value = bonus('pull'); abilities.push({ text: `${pull.maxDistance + value.left}${pullIcon}${pull.range + value.right}`, action: 'pull', upgraded: Boolean(value.left || value.right) }); }
-  if (stun) { const value = bonus('stun'); abilities.push({ text: `${stun.amount + value.left}${stunIcon}${stun.range + value.right}`, action: 'stun', upgraded: Boolean(value.left || value.right) }); }
-  if (mending) { const value = bonus('mending'); abilities.push({ text: `${mending.amount + value.left} ❤️ ${mending.range + value.right}`, action: 'mending', upgraded: Boolean(value.left || value.right) }); }
+  if (cannon) { const value = bonus('cannon'); abilities.push({ text: `${cannon.damage + value.left} ${tirelessPrefix(cannon)}🧨 ${cannon.range + value.right}`, action: 'cannon', upgraded: Boolean(value.left || value.right) }); }
+  if (gore) { const value = bonus('gore'); abilities.push({ text: `${gore.damage + value.left} ${tirelessPrefix(gore)}${goreIcon} ${gore.range + value.right}`, action: 'gore', upgraded: Boolean(value.left || value.right) }); }
+  if (bomb) { const value = bonus('bomb'); abilities.push({ text: `${bomb.damage + value.left} ${tirelessPrefix(bomb)}💣 ${bomb.range + value.right}`, action: 'bomb', upgraded: Boolean(value.left || value.right) }); }
+  if (push) { const value = bonus('push'); abilities.push({ text: `${push.maxDistance + value.left}${tirelessPrefix(push)}${pushIcon}${push.range + value.right}`, action: 'push', upgraded: Boolean(value.left || value.right) }); }
+  if (pull) { const value = bonus('pull'); abilities.push({ text: `${pull.maxDistance + value.left}${tirelessPrefix(pull)}${pullIcon}${pull.range + value.right}`, action: 'pull', upgraded: Boolean(value.left || value.right) }); }
+  if (stun) { const value = bonus('stun'); abilities.push({ text: `${stun.amount + value.left}${tirelessPrefix(stun)}${stunIcon}${stun.range + value.right}`, action: 'stun', upgraded: Boolean(value.left || value.right) }); }
+  if (mending) { const value = bonus('mending'); abilities.push({ text: `${mending.amount + value.left} ${tirelessPrefix(mending)}❤️ ${mending.range + value.right}`, action: 'mending', upgraded: Boolean(value.left || value.right) }); }
   if (upgrade) abilities.push({ text: `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`, action: 'upgrade' });
   if (troop.control) abilities.push({ text: `Control ${troop.control}` });
 
@@ -475,5 +487,5 @@ export function fullEffectLines(troop: Troop): string[] {
 
 /** Keep compact board and card summaries readable without overflowing them. */
 export function threeLineSummary(lines: readonly string[]): string[] {
-  return lines.length > 3 ? [...lines.slice(0, 2), '...'] : [...lines];
+  return lines.length > 3 ? [...lines.slice(0, 2), `${lines[2]} ...`] : [...lines];
 }

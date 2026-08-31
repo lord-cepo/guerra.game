@@ -25,19 +25,29 @@ export function cardTroopIcon(role: Troop['role']): HTMLImageElement {
   icon.alt = role === 'hero' ? 'Hero crown' : role === 'temple' ? 'Temple' : 'Troop helm'; return icon;
 }
 
-export function appendMagicDescriptionText(parent: HTMLElement, text: string): void {
-  for (const part of text.split(/(~[^~]+~)/u).filter(Boolean)) {
-    if (part.startsWith('~') && part.endsWith('~')) {
-      const magic = document.createElement('span'); magic.classList.add('magic-detail'); magic.textContent = part.slice(1, -1); parent.append(magic);
-    } else parent.append(document.createTextNode(part));
+function appendRelationText(parent: HTMLElement, text: string, owner: Player, extraClass?: string): void {
+  for (const part of text.split(/(\[\[(?:friend|enemy)(?:-dark)?:[^\]]+\]\])/u).filter(Boolean)) {
+    const marker = part.match(/^\[\[(friend|enemy)(-dark)?:([^\]]+)\]\]$/u);
+    if (!marker) { const node = document.createTextNode(part); parent.append(node); continue; }
+    const player = marker[1] === 'friend' ? owner : owner === 1 ? 2 : 1;
+    const span = document.createElement('span'); span.classList.add(`relation-player-${player}${marker[2] ? '-dark' : ''}`);
+    if (extraClass) span.classList.add(extraClass); span.textContent = marker[3]; parent.append(span);
   }
 }
 
-function appendCardDetailText(line: HTMLElement, text: string, magicShield = false): void {
-  if (!magicShield) { appendMagicDescriptionText(line, text); return; }
-  const [before, ...after] = text.split('🛡️'); appendMagicDescriptionText(line, before);
+export function appendMagicDescriptionText(parent: HTMLElement, text: string, owner: Player = 1): void {
+  for (const part of text.split(/(~[^~]+~)/u).filter(Boolean)) {
+    if (part.startsWith('~') && part.endsWith('~')) {
+      const magic = document.createElement('span'); magic.classList.add('magic-detail'); appendRelationText(magic, part.slice(1, -1), owner); parent.append(magic);
+    } else appendRelationText(parent, part, owner);
+  }
+}
+
+function appendCardDetailText(line: HTMLElement, text: string, owner: Player, magicShield = false): void {
+  if (!magicShield) { appendMagicDescriptionText(line, text, owner); return; }
+  const [before, ...after] = text.split('🛡️'); appendMagicDescriptionText(line, before, owner);
   const shield = document.createElement('span'); shield.classList.add('magic-detail', 'magic-symbol'); shield.textContent = '🛡︎'; line.append(shield);
-  if (after.length) appendMagicDescriptionText(line, after.join('🛡️'));
+  if (after.length) appendMagicDescriptionText(line, after.join('🛡️'), owner);
 }
 
 function cardVisual(troop: Troop, healthText: string): HTMLSpanElement {
@@ -60,7 +70,7 @@ export function appendTroopCardContent(card: HTMLElement, troop: Troop, detailLi
   const title = document.createElement('strong'); title.textContent = troopDisplayName(troop);
   const details = document.createElement('span'); details.classList.add('troop-details');
   for (const detail of detailLines) {
-    const line = document.createElement('span'); appendCardDetailText(line, detail.text, detail.magicShield);
+    const line = document.createElement('span'); appendCardDetailText(line, detail.text, troop.owner, detail.magicShield);
     if (detail.upgraded) line.classList.add('upgraded-detail'); details.append(line);
   }
   copy.append(title, details);
@@ -95,17 +105,17 @@ function appendRichHoverRule(line: HTMLElement, troop: Troop, rule: string): voi
     const ability = movement[1] === '🥾' ? 'move' : 'fly'; const temporary = upgradeBonus(troop, ability);
     const aura = ability === 'move' ? staticAuraBonus(troop, 'move') : { left: 0, right: 0 };
     line.append(document.createTextNode(`${movement[1]}${Number(movement[2]) - temporary.right - aura.right}`));
-    appendBonus(line, temporary.right, 'temporary-upgrade'); appendBonus(line, aura.right, 'static-upgrade'); appendBoldCopy(line, movement[3]);
+    appendBonus(line, temporary.right, 'temporary-upgrade'); appendBonus(line, aura.right, 'static-upgrade'); appendBoldCopy(line, movement[3], troop.owner);
     appendUpgradeSources(line, troop, ability, (troop.staticAuras ?? []).filter(source => source.ability === ability).map(source => source.sourceCardId)); return;
   }
-  if (!match) { appendBoldCopy(line, rule); return; }
+  if (!match) { appendBoldCopy(line, rule, troop.owner); return; }
   const ability = match[3] === '🏹' ? 'attack' : match[3] === '🔥' ? 'magic' : match[3] === '🛡️' ? 'defense' : match[3] === '🧨' ? 'cannon' : match[3] === goreIcon ? 'gore' : match[3] === '💣' ? 'bomb' : match[3] === '❤️' ? 'mending' : match[3] === pullIcon ? 'pull' : match[3] === stunIcon ? 'stun' : 'push';
   const temporary = upgradeBonus(troop, ability); const aura = ability === 'attack' || ability === 'magic' ? staticAuraBonus(troop, ability) : { left: 0, right: 0 };
   const permanent = ability === 'attack' || ability === 'magic' ? permanentUpgradeBonus(troop, ability) : { left: 0, right: 0 };
   const magenta = { left: aura.left + permanent.left, right: aura.right + permanent.right };
   line.append(document.createTextNode(String(Number(match[1]) - temporary.left - magenta.left))); appendBonus(line, temporary.left, 'temporary-upgrade'); appendBonus(line, magenta.left, 'static-upgrade'); line.append(document.createTextNode(match[2]));
   if (match[3] === '🛡️' && rule.toLowerCase().includes('magic')) { const shield = document.createElement('span'); shield.classList.add('magic-detail', 'magic-symbol'); shield.textContent = '🛡︎'; line.append(shield); } else line.append(document.createTextNode(match[3]));
-  line.append(document.createTextNode(String(Number(match[4]) - temporary.right - magenta.right))); appendBonus(line, temporary.right, 'temporary-upgrade'); appendBonus(line, magenta.right, 'static-upgrade'); appendBoldCopy(line, match[5]);
+  line.append(document.createTextNode(String(Number(match[4]) - temporary.right - magenta.right))); appendBonus(line, temporary.right, 'temporary-upgrade'); appendBonus(line, magenta.right, 'static-upgrade'); appendBoldCopy(line, match[5], troop.owner);
   const sources = (troop.staticAuras ?? []).filter(source => source.ability === ability).map(source => source.sourceCardId); if (permanent.left || permanent.right) sources.push(troop.cardId);
   appendUpgradeSources(line, troop, ability, sources);
 }
@@ -114,10 +124,10 @@ function appendBonus(line: HTMLElement, value: number, className: string): void 
   if (!value) return; const span = document.createElement('span'); span.classList.add(className); span.textContent = `+${value}`; line.append(span);
 }
 
-function appendBoldCopy(line: HTMLElement, text: string): void {
+function appendBoldCopy(line: HTMLElement, text: string, owner: Player): void {
   for (const token of text.split(/(\([^)]+\)|^[^:]+:)/u).filter(Boolean)) {
     if ((token.startsWith('(') && token.endsWith(')')) || token.endsWith(':')) { const label = document.createElement('strong'); label.classList.add('hover-rule-label'); label.textContent = token; line.append(label); }
-    else appendMagicDescriptionText(line, token);
+    else appendMagicDescriptionText(line, token, owner);
   }
 }
 

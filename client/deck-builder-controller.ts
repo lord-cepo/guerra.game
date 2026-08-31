@@ -120,19 +120,20 @@ export function createDeckBuilderController(options: DeckBuilderOptions): DeckBu
   function swapSlots(from: number, to: number): void { draggedDeckSlot = undefined; applyEdit(swapDeckCards(deckSlots, from, to, deckFormat)); }
 
   function renderCard(troop: Troop, className: 'database-card' | 'deck-card', slot?: number): HTMLButtonElement {
-    const card = document.createElement('button'); card.type = 'button'; card.classList.add('troop-card', className);
-    card.dataset.deploymentOwner = className === 'database-card' ? 'blue' : 'red';
+    const card = document.createElement('button'); card.type = 'button'; card.classList.add('troop-card', className, 'server-owner-one');
+    card.dataset.deploymentOwner = 'red';
     if (troop.role === 'hero') card.classList.add('hero-card');
     if (troop.deploymentRegions.includes('starting') && troop.deploymentRegions.includes('intermediate')) card.classList.add('deployment-both');
     else if (troop.deploymentRegions.includes('starting')) card.classList.add('deployment-starting');
     else if (troop.deploymentRegions.includes('intermediate')) card.classList.add('deployment-intermediate');
+    else if (troop.deploymentRegions.includes('front')) card.classList.add('deployment-front');
     if (troop.deploymentRule === 'enemy-region') card.classList.add('deployment-enemy');
     appendTroopCardContent(card, troop, threeLineSummary(fullEffectLines(troop)).map(text => { const magicShield = options.isMagicShieldSummary(troop, text); return { text: magicShield ? text.replace(/^~|~$/g, '') : text, magicShield }; }), `♥ ${troop.baseHealth}`);
     card.addEventListener('pointerenter', () => options.showHover([troop])); card.addEventListener('pointerleave', options.hideHover);
     card.addEventListener('focus', () => options.showHover([troop])); card.addEventListener('blur', options.hideHover);
     card.draggable = true;
     if (className === 'database-card') {
-      card.addEventListener('dragstart', event => { draggedDatabaseCardId = troop.cardId; draggedDeckSlot = undefined; options.beginDrag(event, troop, card, 2); });
+      card.addEventListener('dragstart', event => { draggedDatabaseCardId = troop.cardId; draggedDeckSlot = undefined; options.beginDrag(event, troop, card, 1); });
       card.addEventListener('click', () => applyEdit(addDeckCard(deckSlots, troop.cardId, deckFormat, catalogueById)));
     } else if (slot !== undefined) {
       card.addEventListener('dragstart', event => { draggedDeckSlot = slot; draggedDatabaseCardId = undefined; options.beginDrag(event, troop, card, 1); });
@@ -167,7 +168,7 @@ export function createDeckBuilderController(options: DeckBuilderOptions): DeckBu
   function render(): void {
     ui.gameLayout.classList.add('deck-building'); ui.database.replaceChildren(); ui.deck.replaceChildren();
     ui.database.classList.remove('grouped-card-list', 'sandbox-catalog'); ui.deck.classList.remove('grouped-card-list', 'sandbox-catalog'); ui.database.classList.add('deck-builder', 'grouped-card-list'); ui.deck.classList.add('deck-builder');
-    const available = catalogueIds.filter(id => !deckSlots.includes(id)).map(id => createTroopView(id, 2)).filter((troop): troop is Troop => Boolean(troop)).filter(searchMatches);
+    const available = catalogueIds.filter(id => !deckSlots.includes(id)).map(id => createTroopView(id, 1)).filter((troop): troop is Troop => Boolean(troop)).filter(searchMatches);
     options.appendGroupedCards(ui.database, available, troop => renderCard(troop, 'database-card'));
     for (let slot = 0; slot < deckFormat; slot += 1) {
       const troop = deckSlots[slot] ? createTroopView(deckSlots[slot] as string, 1) : undefined;

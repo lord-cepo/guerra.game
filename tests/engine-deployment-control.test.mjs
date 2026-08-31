@@ -15,7 +15,7 @@ test('a non-hero cannot be deployed before that player deploys a hero', () => {
 
 test('a hero can deploy into its controlled starting region and passes the turn', () => {
   const next = applyGameAction(createGameState(), 1, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' }, cards);
-  assert.deepEqual(next.units, [{ id: '1:tiger-queen', troopId: 'tiger-queen', owner: 1, coordinate: '1,2', permanentDamage: 0 }]);
+  assert.deepEqual(next.units, [{ id: '1:tiger-queen', troopId: 'tiger-queen', owner: 1, coordinate: '1,2', permanentDamage: 0, inactiveOnTurn: 0 }]);
   assert.equal(next.activePlayer, 2);
 });
 
@@ -141,4 +141,3 @@ test('every catalogue card has at least one rule-compliant deployment state', ()
     assert.ok(deployed.units.some(unit => unit.troopId === troop.id && unit.coordinate === coordinate));
   }
 });
-

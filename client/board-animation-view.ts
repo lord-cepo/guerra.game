@@ -5,6 +5,7 @@ import { svgNamespace } from './board-geometry.js';
 const shieldFrameUrls = Array.from({ length: 7 }, (_, index) => `./assets/shield-${index}.png`);
 export const shieldFrameCount = shieldFrameUrls.length;
 const shieldFlightSize = shieldAnimationSize * .5;
+export const modifierGainAnimationDuration = 700;
 
 export function appendProjectileTrail(board: SVGSVGElement, trajectory: QuadraticTrajectory, iterations = Infinity, phaseDelay = 0): void {
   for (let index = 0; index < projectileTrailSegments; index += 1) {
@@ -28,6 +29,32 @@ export function appendShieldFrameSequence(board: SVGSVGElement, target: Point, d
     const frameDelay = delay + sequenceIndex * shieldFrameDuration; const duration = reduced ? 450 : shieldFrameDuration;
     window.setTimeout(() => { frame.style.opacity = '1'; }, frameDelay); window.setTimeout(() => { frame.style.opacity = '0'; }, frameDelay + duration);
   }
+}
+
+/** Present a non-continuous modifier gain without implying that a Shield was used. */
+export function appendModifierGain(board: SVGSVGElement, target: Point, delay = 0, magic = false): void {
+  const image = document.createElementNS(svgNamespace, 'image');
+  image.dataset.serverRender = 'modifier-animation';
+  image.classList.add('modifier-gain-animation');
+  image.setAttribute('href', './assets/upgrade.png');
+  const size = 54;
+  image.setAttribute('x', String(target.x - size / 2));
+  image.setAttribute('y', String(target.y - size / 2));
+  image.setAttribute('width', String(size));
+  image.setAttribute('height', String(size));
+  if (!magic) image.style.filter = 'grayscale(1)';
+  board.append(image);
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) {
+    image.animate([{ opacity: 0 }, { opacity: .8 }, { opacity: 0 }], { duration: 450, delay, fill: 'forwards' });
+    return;
+  }
+  image.animate([
+    { opacity: 0, clipPath: 'inset(100% 0 0 0)', offset: 0 },
+    { opacity: 1, clipPath: 'inset(0 0 0 0)', offset: .62 },
+    { opacity: 1, clipPath: 'inset(0 0 0 0)', offset: .76 },
+    { opacity: 0, clipPath: 'inset(0 0 0 0)', offset: 1 },
+  ], { duration: modifierGainAnimationDuration, delay, easing: 'ease-out', fill: 'forwards' });
 }
 
 export function appendFlyingShield(board: SVGSVGElement, source: Point, target: Point, magic = false): void {

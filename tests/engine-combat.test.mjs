@@ -201,6 +201,40 @@ test('Titanium rejects delayed physical attacks without consuming shields', () =
   assert.deepEqual(titanium?.shields, [{ value: 2 }]);
 });
 
+test('Titanium deals bash damage without receiving it and keeps the bash pending when both survive', () => {
+  cards.set('titanium-test', { id: 'titanium-test', name: 'Titanium Test', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: [{ kind: 'move', range: 1 }], passives: ['titanium'] });
+  const state = {
+    activePlayer: 1,
+    units: [
+      { id: '1:titanium-test', troopId: 'titanium-test', owner: 1, coordinate: '1,1', permanentDamage: 0, shields: [{ value: 1, sourceUnitId: '1:titanium-test' }] },
+      { id: '2:queen-bee', troopId: 'queen-bee', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+    ], effects: [], bashes: [], lastActingTroopId: {}
+  };
+  const bash = applyGameAction(state, 1, { type: 'move', troopId: 'titanium-test', coordinate: '1,0' }, cards);
+  const afterEnd = applyGameAction(bash, 2, { type: 'pass' }, cards);
+  const resolved = applyGameAction(afterEnd, 1, { type: 'pass' }, cards);
+  const titanium = resolved.units.find(unit => unit.troopId === 'titanium-test');
+  const defender = resolved.units.find(unit => unit.troopId === 'queen-bee');
+  assert.equal(titanium?.permanentDamage, 0);
+  assert.deepEqual(titanium?.shields, [{ value: 1, sourceUnitId: '1:titanium-test' }]);
+  assert.ok((defender?.permanentDamage ?? 0) > 0);
+  assert.equal(resolved.bashes.length, 1);
+  assert.equal(resolved.bashes[0].awaitingEnd, undefined, 'the retained bash is ready again after the resolving turn End');
+});
+
+test('two Titanium troops exchange no bash damage and remain pending', () => {
+  cards.set('titanium-test', { id: 'titanium-test', name: 'Titanium Test', role: 'troop', baseHealth: 1, deploymentRegions: ['intermediate'], actions: [{ kind: 'move', range: 1 }], passives: ['titanium'] });
+  const state = { activePlayer: 1, units: [
+    { id: '1:titanium-test', troopId: 'titanium-test', owner: 1, coordinate: '1,1', permanentDamage: 0 },
+    { id: '2:iron-bell-golem', troopId: 'iron-bell-golem', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const bash = applyGameAction(state, 1, { type: 'move', troopId: 'titanium-test', coordinate: '1,0' }, cards);
+  const afterEnd = applyGameAction(bash, 2, { type: 'pass' }, cards);
+  const resolved = applyGameAction(afterEnd, 1, { type: 'pass' }, cards);
+  assert.deepEqual(resolved.units.map(unit => unit.permanentDamage), [0, 0]);
+  assert.equal(resolved.bashes.length, 1);
+});
+
 test('Obsidian rejects delayed magic without consuming its magic modifier', () => {
   const state = {
     activePlayer: 1,

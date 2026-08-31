@@ -98,14 +98,15 @@ export function createTroopTrayController(options: TroopTrayOptions): TroopTrayC
   function isMagicShieldSummary(troop: Troop, text: string): boolean { return isMagicShieldSummaryText(troop, text); }
 
   function renderCard(match: ServerMatchState, owner: Player, troop: Troop, interactive: boolean): HTMLButtonElement {
-    const lastActing = match.lastActingTroopId?.[owner] === troop.cardId || (match.units.find(unit => unit.owner === owner && unit.troopId === troop.cardId)?.stunnedTurns ?? 0) > 0;
+    const deployedUnit = match.units.find(unit => unit.owner === owner && unit.troopId === troop.cardId);
+    const lastActing = Boolean(deployedUnit?.inactive) || (!deployedUnit && match.lastActingTroopId?.[owner] === troop.cardId) || (deployedUnit?.stunnedTurns ?? 0) > 0;
     const free = Boolean(match.sandbox && match.sandboxFreePlacement); const canDeploy = free || hasDeploymentTarget(match, owner, troop);
     const canChoose = interactive && !match.winner && !troop.defeated && !lastActing && canDeploy; const dragMode = free ? 'free' : canChoose ? 'deploy' : undefined;
     const card = document.createElement('button'); card.type = 'button'; card.disabled = !free && !canChoose; card.draggable = false; card.classList.add('troop-card', owner === 1 ? 'server-owner-one' : 'server-owner-two');
     if (!free && owner !== match.activePlayer) card.classList.add('inactive-player-card'); card.dataset.deploymentOwner = owner === 1 ? 'red' : 'blue';
     if (troop.role === 'hero') card.classList.add('hero-card'); if (lastActing) card.classList.add('last-acting-card'); if (troop.defeated || lastActing) card.classList.add('unavailable-card'); if (!free && !canDeploy) card.classList.add('undeployable-card');
     if ((owner === options.localPlayer() && options.selectedTroopId() === troop.cardId) || match.selections?.[owner] === troop.cardId) card.classList.add('selected-card');
-    if (troop.deploymentRegions.includes('starting') && troop.deploymentRegions.includes('intermediate')) card.classList.add('deployment-both'); else if (troop.deploymentRegions.includes('starting')) card.classList.add('deployment-starting'); else if (troop.deploymentRegions.includes('intermediate')) card.classList.add('deployment-intermediate'); if (troop.deploymentRule === 'enemy-region') card.classList.add('deployment-enemy');
+    if (troop.deploymentRegions.includes('starting') && troop.deploymentRegions.includes('intermediate')) card.classList.add('deployment-both'); else if (troop.deploymentRegions.includes('starting')) card.classList.add('deployment-starting'); else if (troop.deploymentRegions.includes('intermediate')) card.classList.add('deployment-intermediate'); else if (troop.deploymentRegions.includes('front')) card.classList.add('deployment-front'); if (troop.deploymentRule === 'enemy-region') card.classList.add('deployment-enemy');
     const details = threeLineSummary(troop.defeated ? ['Defeated'] : serverCardDetails(troop)).map(text => { const magicShield = isMagicShieldSummary(troop, text); const clean = magicShield ? text.replace(/^~|~$/g, '') : text; return { text: clean, upgraded: clean.startsWith('🔮 '), magicShield }; });
     appendTroopCardContent(card, troop, details, cardHealthDescription(troop));
     card.addEventListener('pointerenter', () => options.showHover([troop])); card.addEventListener('pointerleave', options.hideHover); card.addEventListener('focus', () => options.showHover([troop])); card.addEventListener('blur', options.hideHover);

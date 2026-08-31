@@ -34,6 +34,7 @@ export interface BashResolutionAnimation {
   attacker: ServerUnitState;
   defender: ServerUnitState;
   winnerId?: string;
+  continues: boolean;
   delay: number;
   firstStrike?: NonNullable<ServerTriggerEvent['firstStrike']>;
 }
@@ -175,7 +176,7 @@ export function resolvedDamageAnimations(previous: ServerMatchState | undefined,
       owner: target.owner,
       oldHealth: target.currentHealth,
       newHealth: nextTarget?.currentHealth ?? 0,
-      totalHealth: options.baseHealthForTroop(target.troopId) ?? target.currentHealth,
+      totalHealth: target.maxHealth ?? options.baseHealthForTroop(target.troopId) ?? target.currentHealth,
       oldModifier: target.combat.modifier,
       physicalDamage: physicalEffects.filter(effect => !effect.pierce).reduce((sum, effect) => sum + effect.value, 0),
       includesPhysical: physicalEffects.length > 0,
@@ -218,7 +219,7 @@ export function instantResolutionPresentation(previous: ServerMatchState | undef
   return { projectiles: [projectile], damage: [{
     targetId: target.id, troopId: target.troopId, coordinate: action.coordinate, owner: target.owner,
     oldHealth: target.currentHealth, newHealth: survivingTarget?.currentHealth ?? 0,
-    totalHealth: options.baseHealthForTroop(target.troopId) ?? target.currentHealth,
+    totalHealth: target.maxHealth ?? options.baseHealthForTroop(target.troopId) ?? target.currentHealth,
     oldModifier: target.combat.modifier, physicalDamage: ranged ? pending.damage : 0,
     includesPhysical: ranged, ignoresModifier: false,
     delay: projectileTravelDuration + projectileImpactDuration, killed: survivingTarget === undefined,
@@ -263,18 +264,18 @@ export function resolvedBashAnimations(previous: ServerMatchState | undefined, n
       ? projectileTravelDuration + shieldFrameDuration * options.shieldFrameCount
       : 0;
   return previous.bashes
-    .filter(bash => !next.bashes.some(candidate => candidate.attackerId === bash.attackerId && candidate.defenderId === bash.defenderId && candidate.target === bash.target))
     .filter(bash => newBashResolutions.some(event => event.hex === bash.target && event.attackerId === bash.attackerId && event.defenderId === bash.defenderId))
     .flatMap(bash => {
       const attacker = previous.units.find(unit => unit.id === bash.attackerId);
       const defender = previous.units.find(unit => unit.id === bash.defenderId);
       if (!attacker || !defender) return [];
       const survivors = [attacker, defender].filter(unit => next.units.some(candidate => candidate.id === unit.id));
+      const continues = next.bashes.some(candidate => candidate.attackerId === bash.attackerId && candidate.defenderId === bash.defenderId && candidate.target === bash.target);
       const resolution = newBashResolutions.find(event => event.hex === bash.target && event.attackerId === bash.attackerId && event.defenderId === bash.defenderId);
       const resolvesPendingGore = previous.effects.some(effect => effect.kind === 'gore' && effect.target === bash.target
         && effect.sourceUnitId === bash.attackerId && effect.targetUnitId === bash.defenderId);
       return [{
-        bash, attacker, defender, winnerId: survivors.length === 1 ? survivors[0]?.id : undefined,
+        bash, attacker, defender, winnerId: survivors.length === 1 ? survivors[0]?.id : undefined, continues,
         delay: Math.max(shieldDelay, resolvesPendingGore ? goreResolutionDelay(next, options) : 0),
         firstStrike: resolution?.firstStrike,
       }];

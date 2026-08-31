@@ -2,7 +2,7 @@ import { hexDistance, type Coordinate } from '../game/board.js';
 import type { Player } from '../game/types.js';
 import { curvedTrajectory, unwrappedTrajectoryAngles, type Point, type QuadraticTrajectory } from './board-animation-geometry.js';
 import { deploymentAnimationDuration, projectileCycleDuration, projectileImpactDuration, projectileMaterializationOpacity, projectileTravelDuration, stunAnimationDuration } from './board-animation-timing.js';
-import { appendFlyingShield as appendFlyingShieldView, appendMendingFlight as appendMendingFlightView, appendProjectileTrail as appendProjectileTrailView, appendShieldFrameSequence as appendShieldFrameSequenceView, appendStunImage as appendStunImageView } from './board-animation-view.js';
+import { appendFlyingShield as appendFlyingShieldView, appendMendingFlight as appendMendingFlightView, appendModifierGain as appendModifierGainView, appendProjectileTrail as appendProjectileTrailView, appendShieldFrameSequence as appendShieldFrameSequenceView, appendStunImage as appendStunImageView, modifierGainAnimationDuration } from './board-animation-view.js';
 import { hexGap, hexPoints, hexSize as size, horizontalScale, svgNamespace as ns } from './board-geometry.js';
 import { confirmedServerProjectiles as deriveConfirmedServerProjectiles, serverProjectileKey, stagedServerProjectile as deriveStagedServerProjectile, type ServerProjectile } from './board-projectiles.js';
 import type { HexGridState } from './hex-grid-state.js';
@@ -125,23 +125,36 @@ function stagedServerProjectile(match: ServerMatchState): ServerProjectile | und
 }
 
 function appendShieldFrameSequence(target: Point, delay = 0, magic = false): void { appendShieldFrameSequenceView(context.board, target, delay, magic); }
+function appendModifierGain(target: Point, delay = 0, magic = false): void { appendModifierGainView(context.board, target, delay, magic); }
 
 function appendServerTriggeredShieldAnimations(match: ServerMatchState, previous: ServerMatchState | undefined): void {
   if (!previous || previous.id !== match.id || previous.revision === match.revision) return;
   const latestType = match.events?.at(-1)?.action.type;
-  // Explicit Defense uses the staged/confirmed dispatcher. Snapshot
-  // differences here are reserved for triggered physical shield grants.
-  if (latestType === 'defense' || latestType === 'self-defense') return;
+  // Explicit Defense uses the staged/confirmed dispatcher.
+  if (latestType === 'defense' || latestType === 'self-defense' || latestType === 'magic-defense' || latestType === 'self-magic-defense') return;
+  const previousRows = new Set((previous.dashboard ?? []).map(row => row.id));
+  const modifierChanged = (match.dashboard ?? []).some(row => !previousRows.has(row.id) && row.causedByTriggerId && row.action.kind === 'modifier');
   for (const unit of match.units) {
     const oldUnit = previous.units.find(candidate => candidate.id === unit.id);
     const oldShield = oldUnit?.shields?.reduce((sum, shield) => sum + shield.value, 0) ?? 0;
     const newShield = unit.shields?.reduce((sum, shield) => sum + shield.value, 0) ?? 0;
-    if (newShield <= oldShield) continue;
+    const oldMagic = oldUnit?.magicModifierBonus ?? 0;
+    const newMagic = unit.magicModifierBonus ?? 0;
+    const physicalGain = newShield > oldShield;
+    const magicGain = newMagic > oldMagic;
+    if (!physicalGain && !magicGain) continue;
     const target = state.cellsByCoordinate.get(unit.coordinate)?.position;
     const delay = !oldUnit && latestType === 'deploy' && match.events?.at(-1)?.player !== state.localMatchPlayer
       ? deploymentAnimationDuration
       : 0;
-    if (target) appendShieldFrameSequence(target, delay);
+    if (!target) continue;
+    if (!modifierChanged) {
+      if (physicalGain) appendShieldFrameSequence(target, delay);
+      if (magicGain) appendShieldFrameSequence(target, delay + (physicalGain ? modifierGainAnimationDuration : 0), true);
+      continue;
+    }
+    if (physicalGain) appendModifierGain(target, delay, false);
+    if (magicGain) appendModifierGain(target, delay + (physicalGain ? modifierGainAnimationDuration : 0), true);
   }
 }
 

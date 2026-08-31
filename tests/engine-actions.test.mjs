@@ -12,7 +12,29 @@ test('a troop cannot act on two consecutive turns', () => {
   ], effects: [], bashes: [] };
   const p1Turn = applyGameAction(state, 1, { type: 'attack', troopId: 'queen-bee', coordinate: '1,0' }, cards);
   const p2Turn = applyGameAction(p1Turn, 2, { type: 'magic', troopId: 'squirrel-king', coordinate: '-1,0' }, cards);
-  assert.throws(() => applyGameAction(p2Turn, 1, { type: 'attack', troopId: 'queen-bee', coordinate: '1,0' }, cards), /previous turn/);
+  assert.throws(() => applyGameAction(p2Turn, 1, { type: 'attack', troopId: 'queen-bee', coordinate: '1,0' }, cards), /inactive/);
+});
+
+test('a Tireless action does not make its troop inactive', () => {
+  const state = { activePlayer: 1, units: [
+    { troopId: 'tireless-test', owner: 1, coordinate: '1,1', permanentDamage: 0 },
+    { troopId: 'squirrel-king', owner: 2, coordinate: '-1,-1', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const afterTireless = applyGameAction(state, 1, { type: 'attack', troopId: 'tireless-test', coordinate: '1,0' }, cards);
+  const tireless = afterTireless.units.find(unit => unit.troopId === 'tireless-test');
+  assert.equal(tireless?.inactiveOnTurn, undefined);
+  assert.notEqual(afterTireless.lastActingTroopId?.[1], 'tireless-test');
+  const afterReply = applyGameAction(afterTireless, 2, { type: 'magic', troopId: 'squirrel-king', coordinate: '-1,0' }, cards);
+  assert.doesNotThrow(() => applyGameAction(afterReply, 1, { type: 'attack', troopId: 'tireless-test', coordinate: '1,0' }, cards));
+});
+
+test('a new normal action replaces older inactivity for that player', () => {
+  const first = applyGameAction(createGameState(), 1, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' }, cards);
+  const reply = applyGameAction(first, 2, { type: 'deploy', troopId: 'squirrel-king', coordinate: '-1,-2' }, cards);
+  const second = applyGameAction(reply, 1, { type: 'deploy', troopId: 'moss-tortoise', coordinate: '1,1' }, cards);
+  assert.equal(second.activePlayer, 2);
+  assert.equal(second.units.find(unit => unit.id === '1:tiger-queen')?.inactiveOnTurn, undefined);
+  assert.equal(second.units.find(unit => unit.id === '1:moss-tortoise')?.inactiveOnTurn, 2);
 });
 test('defeated troops cannot be redeployed', () => {
   const state = createGameState();
@@ -359,7 +381,7 @@ test('Merino Ram can Gore across intervening Yak and Crane troops', () => {
   assert.equal(resolved.effects.some(effect => effect.kind === 'gore'), false);
 });
 
-test('Ironhide Boar Pup gains both permanent modifiers once per troop damaged by Gore', () => {
+test('Ironhide Boar Pup gains both temporary modifiers once per troop hit by Gore', () => {
   const state = {
     activePlayer: 2,
     units: [
@@ -373,7 +395,7 @@ test('Ironhide Boar Pup gains both permanent modifiers once per troop damaged by
   while (ready.pendingResolution) ready = applyGameAction(ready, 1, { type: 'resolve-pass', troopId: ready.pendingResolution.sourceTroopId }, cards);
   const resolved = applyGameAction(ready, 1, { type: 'pass' }, cards);
   const boar = resolved.units.find(unit => unit.troopId === 'ironhide-boar-pup');
-  assert.equal(boar?.combatModifierBonus, 2);
+  assert.equal(boar?.shields?.reduce((sum, shield) => sum + shield.value, 0), 2);
   assert.equal(boar?.magicModifierBonus, 2);
   assert.equal(resolved.triggerEvents.filter(event => event.trigger === 'successfulAttack' && event.actionKind === 'gore').length, 2);
 });

@@ -126,6 +126,7 @@
       overflow-y: auto;
       align-content: start;
       padding-right: .35rem;
+      gap: 1.35rem;
     }
     /* Playground uses the same full-card, scrollable catalogue treatment while
        keeping the board visible between the two trays. */
@@ -154,6 +155,17 @@
       line-height: 1;
       text-transform: uppercase;
     }
+    .game-layout.deck-building #player-two-cards .card-role-heading {
+      margin: .45rem .55rem .2rem;
+      color: #e5e7eb;
+      font-size: clamp(1.75rem, 1.9vw, 2.15rem);
+      font-weight: 900;
+      letter-spacing: .09em;
+      line-height: 1.05;
+      -webkit-text-stroke: 1px rgb(15 23 42 / .96);
+      paint-order: stroke fill;
+      text-shadow: 0 2px 1px #000, 0 0 5px rgb(0 0 0 / .82);
+    }
     .card-role-cards {
       display: grid;
       gap: .55rem;
@@ -161,6 +173,26 @@
     }
     .game-layout.deck-building .grouped-card-list .card-role-cards {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.35rem .8rem;
+    }
+    /* The selected deck contains cards directly instead of nesting them in
+       role groups. Give it the catalogue's intrinsic rows and exact gaps so
+       percentage-width 3:2 cards contribute their full height to layout. */
+    .game-layout.deck-building #player-one-cards {
+      grid-auto-rows: max-content;
+      gap: 1.35rem .8rem;
+      align-items: start;
+    }
+    .game-layout.deck-building #player-one-cards .troop-card.deck-empty {
+      border: 2px dashed rgb(148 163 184 / .72);
+      border-radius: .45rem;
+      background: rgb(148 163 184 / .18);
+      box-shadow: inset 0 0 1.2rem rgb(203 213 225 / .12);
+      color: #d1d5db;
+      font-size: clamp(1.35rem, 1.55vw, 1.8rem);
+      font-weight: 900;
+      text-align: center;
+      text-shadow: 0 1px 1px #000, 0 0 4px rgb(0 0 0 / .72);
     }
     .troop-card.deck-empty { display: grid; place-items: center; border-style: dashed; color: #94a3b8; cursor: default; }
     .troop-card.database-card { cursor: grab; }
@@ -168,9 +200,12 @@
       position: relative;
       overflow: visible;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 4.5rem;
-      width: 100%;
-      min-height: 4.35rem;
+      grid-template-columns: minmax(0, 1fr) 4.8rem;
+      width: 90%;
+      max-width: 90%;
+      justify-self: center;
+      min-height: 0;
+      aspect-ratio: 3 / 2;
       padding: 0;
       border: 0;
       border-radius: 0;
@@ -179,8 +214,8 @@
       text-align: left;
       font: inherit;
       cursor: pointer;
-      box-shadow: 0 .18rem .55rem rgb(0 0 0 / .18);
-      transition: border-color .14s ease, background .14s ease, box-shadow .14s ease, opacity .14s ease, transform .14s ease;
+      box-shadow: none;
+      transition: opacity .14s ease, transform .14s ease;
     }
     .troop-card::after {
       content: '';
@@ -190,10 +225,12 @@
       bottom: 0;
       border-left: 1px solid #64748b;
       pointer-events: none;
+      display: none;
     }
     .troop-card.deployment-starting::before,
     .troop-card.deployment-intermediate::before,
     .troop-card.deployment-both::before,
+    .troop-card.deployment-front::before,
     .troop-card.deployment-enemy::before {
       content: '';
       position: absolute;
@@ -211,10 +248,11 @@
     .player-one-tray .troop-card.deployment-starting::before { background: #b91c1c; }
     .player-one-tray .troop-card.deployment-intermediate::before { background: #f87171; }
     .player-one-tray .troop-card.deployment-both::before { background: linear-gradient(#b91c1c 50%, #f87171 50%); }
+    .troop-card.deployment-front::before { background: #cbd5e1; }
     .troop-card:hover, .troop-card:focus-visible {
-      border-color: #e2e8f0;
-      background: linear-gradient(145deg, #334155, #1e293b);
-      box-shadow: 0 .35rem 1rem rgb(0 0 0 / .28);
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
       outline: none;
       transform: translateY(-1px);
     }
@@ -226,14 +264,14 @@
       cursor: not-allowed;
     }
     .troop-card.undeployable-card:hover {
-      border-color: #334155;
-      background: linear-gradient(145deg, #1e293b, #131c2e);
-      box-shadow: 0 .18rem .55rem rgb(0 0 0 / .18);
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
       transform: none;
     }
     .troop-card.selected-card {
-      background: linear-gradient(145deg, #3a475c, #202c40);
-      box-shadow: 0 .35rem 1rem rgb(0 0 0 / .3);
+      background: transparent;
+      box-shadow: none;
       transform: translateY(-1px);
     }
     .troop-card.inactive-player-card {
@@ -241,7 +279,7 @@
       filter: saturate(.45);
       cursor: not-allowed;
     }
-    .troop-card.inactive-player-card:hover { border-color: inherit; background: linear-gradient(145deg, #1e293b, #131c2e); box-shadow: 0 .18rem .55rem rgb(0 0 0 / .18); transform: none; }
+    .troop-card.inactive-player-card:hover { border-color: transparent; background: transparent; box-shadow: none; transform: none; }
     .troop-card .card-copy {
       position: relative;
       z-index: 4;
@@ -252,7 +290,8 @@
       flex-direction: column;
       justify-content: center;
       align-items: flex-start;
-      padding: .35rem .55rem .4rem .9rem;
+      padding: .65rem .7rem .65rem 1.1rem;
+      background: linear-gradient(to right, rgb(8 10 15 / .38) 0%, rgb(8 10 15 / .16) 58%, transparent 88%);
       pointer-events: none;
     }
     .troop-card .card-copy strong {
@@ -261,26 +300,28 @@
       max-width: 100%;
       padding-right: .2rem;
       color: #fff;
-      font-size: .98rem;
+      font-size: clamp(1.24rem, 1.34vw, 1.6rem);
       font-weight: 900;
       line-height: 1.15;
       text-shadow: 0 1px 1px #000, 0 0 3px #000, 0 0 7px rgb(0 0 0 / .95);
       -webkit-text-stroke: .35px rgb(0 0 0 / .9);
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      white-space: normal;
     }
     .troop-card > .troop-details {
       display: none;
     }
     .troop-card .card-copy > .troop-details {
       display: grid;
-      width: calc(100% - 4.25rem);
-      margin-top: .2rem;
+      width: calc(100% - 4.35rem);
+      margin-top: .3rem;
       color: #fff;
-      font-size: .86rem;
+      font-size: clamp(1.02rem, 1.12vw, 1.26rem);
       font-weight: 800;
-      line-height: 1.2;
+      line-height: 1.18;
       text-shadow: 0 1px 1px #000, 0 0 3px #000, 0 0 6px #000;
       overflow: hidden;
     }
@@ -289,15 +330,17 @@
     .magic-detail.magic-symbol { font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif; }
     .upgraded-detail { color: #c084fc; }
     .card-visual {
-      position: relative;
+      position: absolute;
       z-index: 2;
-      grid-column: 2;
-      grid-row: 1;
+      right: .8rem;
+      bottom: 20%;
+      width: 4.8rem;
+      height: 3.7rem;
       display: grid;
       grid-template-rows: minmax(0, 1fr) auto;
       place-items: center;
       min-width: 0;
-      padding: 1.15rem .25rem .3rem;
+      padding: 0;
     }
     .troop-symbol {
       display: block;
@@ -307,7 +350,7 @@
       justify-self: center;
       filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 2px #000) drop-shadow(0 0 4px #000);
     }
-    img.troop-symbol { width: 1.9rem; height: 1.9rem; margin: 0; object-fit: contain; object-position: center; }
+    img.troop-symbol { width: 1.9rem; height: 1.9rem; margin: 0; object-fit: contain; object-position: center; filter: brightness(0); }
     .troop-card-artwork,
     .troop-card-frame {
       position: absolute;
@@ -320,7 +363,7 @@
       height: 100%;
       object-fit: cover;
       object-position: center;
-      opacity: .8;
+      opacity: .96;
       overflow: hidden;
       clip-path: inset(0);
       -webkit-mask-image:
@@ -334,8 +377,10 @@
     }
     .troop-card-frame {
       z-index: 3;
-      inset: -.45rem;
+      inset: 0;
       background: url('./assets/card_frame.png') center / 105% 108% no-repeat;
+      transform: scale(1.1);
+      transform-origin: center;
     }
     .card-health {
       display: block;
@@ -348,19 +393,23 @@
       -webkit-text-stroke: .3px #000;
       white-space: nowrap;
     }
-    .hero-card { background: #2f2818; }
-    .player-two-tray .troop-card { border-color: #3b82f6; }
-    .player-one-tray .troop-card { border-color: #ef4444; }
-    .troop-tray .troop-card.server-owner-one { border: 2px solid #ef4444; }
-    .troop-tray .troop-card.server-owner-two { border: 2px solid #3b82f6; }
+    .hero-card { background: transparent; }
+    .player-two-tray .troop-card,
+    .player-one-tray .troop-card,
+    .troop-tray .troop-card.server-owner-one,
+    .troop-tray .troop-card.server-owner-two { border: 0; }
     .troop-card.server-owner-one.deployment-starting::before { background: #b91c1c; }
     .troop-card.server-owner-one.deployment-intermediate::before { background: #f87171; }
     .troop-card.server-owner-one.deployment-both::before { background: linear-gradient(#b91c1c 50%, #f87171 50%); }
     .troop-card.server-owner-two.deployment-starting::before { background: #1d4ed8; }
     .troop-card.server-owner-two.deployment-intermediate::before { background: #60a5fa; }
     .troop-card.server-owner-two.deployment-both::before { background: linear-gradient(#1d4ed8 50%, #60a5fa 50%); }
+    .relation-player-1 { color: #f87171; fill: #f87171; }
+    .relation-player-2 { color: #60a5fa; fill: #60a5fa; }
+    .relation-player-1-dark { color: #991b1b; fill: #991b1b; }
+    .relation-player-2-dark { color: #1e40af; fill: #1e40af; }
     /* Defeated/unavailable cards are neutral regardless of their owner. */
-    .game-layout:not(.deck-building) .troop-tray .troop-card.unavailable-card { border: 2px solid #94a3b8; }
+    .game-layout:not(.deck-building) .troop-tray .troop-card.unavailable-card { border: 0; }
     .game-layout:not(.deck-building) .troop-tray .troop-card.selected-card { box-shadow: 0 .35rem 1rem rgb(0 0 0 / .3); }
     .hex { fill: transparent; stroke: #e5e7eb; stroke-width: 1.5; cursor: pointer; transition: stroke .15s; }
     .board-hex-artwork { pointer-events: none; }
@@ -1115,13 +1164,45 @@
       width: 1.62rem;
       height: 1.62rem;
       transform: translateY(-.32rem);
-      filter: drop-shadow(0 1px 1px rgb(0 0 0 / .72)) drop-shadow(0 0 1px rgb(0 0 0 / .55));
+      filter: brightness(0) drop-shadow(0 1px 0 rgb(255 255 255 / .34));
     }
     #hover-details img.troop-symbol {
       width: 2.2rem;
       height: 2.2rem;
       transform: translateX(-.35rem);
       filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 2px #000);
+    }
+    /* Match cards keep the compact typography used before their horizontal
+       3:2 redesign; only the positioning adapts to the wider artwork. */
+    .game-layout:not(.deck-building) .troop-tray .troop-card .card-copy {
+      justify-content: center;
+      padding: .65rem .7rem .65rem 1.1rem;
+    }
+    .game-layout:not(.deck-building) .troop-tray .troop-card .card-copy strong {
+      font-size: .98rem;
+      line-height: 1.15;
+    }
+    .game-layout:not(.deck-building) .troop-tray .troop-card .card-copy > .troop-details {
+      width: 74%;
+      margin-top: .2rem;
+      font-size: .86rem;
+      line-height: 1.2;
+    }
+    .game-layout:not(.deck-building) .troop-tray .troop-card .card-visual {
+      right: 4%;
+      bottom: 18%;
+      width: 24%;
+      height: 58%;
+    }
+    .game-layout:not(.deck-building) .troop-tray .troop-card img.troop-symbol {
+      width: 1.62rem;
+      height: 1.62rem;
+      transform: translateY(-18%);
+    }
+    .game-layout:not(.deck-building) .troop-tray .troop-card .card-health {
+      max-width: 100%;
+      font-size: 1.3rem;
+      line-height: 1;
     }
     #troop-inspector { font-size: 1.08rem; font-weight: 700; }
     #action-bar { font-size: 1.08rem; font-weight: 700; }
@@ -1173,8 +1254,8 @@
       .game-layout.deck-building .card-list { grid-template-columns: 1fr; }
       .game-layout.deck-building .grouped-card-list .card-role-cards { grid-template-columns: 1fr; }
     }
-    /* The bar uses only the rendered card owner. Database cards are Blue;
-       deck cards are Red; live cards use the player who owns them. */
+    /* The bar uses only the rendered card owner. Deck-builder catalogue and
+       selected cards are Red; live cards use the player who owns them. */
     .troop-card[data-deployment-owner="red"].deployment-starting::before { background: #b91c1c !important; }
     .troop-card[data-deployment-owner="red"].deployment-intermediate::before { background: #f87171 !important; }
     .troop-card[data-deployment-owner="red"].deployment-both::before { background: linear-gradient(#b91c1c 50%, #f87171 50%) !important; }

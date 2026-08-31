@@ -29,11 +29,13 @@ function sandboxState(match) {
     winner: match.winner,
     revision: match.revision,
     decks: match.decks,
-    units: match.units.map(({ currentHealth: _currentHealth, combat: _combat, ...unit }) => unit),
+    units: match.units.map(({ currentHealth: _currentHealth, maxHealth: _maxHealth, inactive: _inactive, combat: _combat, ...unit }) => unit),
     effects: match.effects,
     bashes: match.bashes,
     bombs: match.bombs ?? [],
     lastActingTroopId: match.lastActingTroopId,
+    turnCounts: match.turnCounts,
+    turnNumber: match.turnNumber,
     defeatedTroopIds: match.defeatedTroopIds,
     events: match.events
   };

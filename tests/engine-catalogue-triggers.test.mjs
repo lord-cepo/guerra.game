@@ -21,10 +21,10 @@ test('the expansion cards expose their revised health, actions, and compact pass
   assert.deepEqual(cards.get('raven-prince').actions, [{ kind: 'fly', range: 3 }]);
   assert.equal(cards.get('raven-prince').passiveDescription, 'End: 1🚫1');
   assert.equal(cards.get('temple-last-bell').baseHealth, 2);
-  assert.equal(cards.get('temple-last-bell').passiveDescription, '💀: 3F🏹3');
+  assert.equal(cards.get('temple-last-bell').passiveDescription, '💀: 3F🏹3 & 3F🏹3');
   assert.equal(cards.get('temple-marches').baseHealth, 2);
   assert.deepEqual(cards.get('tortoise-emperor').actions, []);
-  assert.equal(cards.get('tortoise-emperor').passiveDescription, 'End: adj +1🛡️');
+  assert.equal(cards.get('tortoise-emperor').passiveDescription, 'End: +1 [[friend:all adj]]');
 });
 
 test('active and triggered card actions share the normalized action dictionary', () => {
@@ -94,6 +94,15 @@ test('Wandering Monarch End event pauses the turn for an optional one-hex move',
   const declined = applyGameAction(declinedPending, 1, { type: 'resolve-pass', troopId: 'wandering-monarch' }, cards);
   assert.equal(declined.units.find(unit => unit.troopId === 'wandering-monarch')?.coordinate, '1,2');
   assert.equal(declined.activePlayer, 2);
+});
+
+test('a newly deployed Wandering Monarch is inactive before its same-turn End trigger', () => {
+  const next = applyGameAction(createGameState(), 1, { type: 'deploy', troopId: 'wandering-monarch', coordinate: '1,2' }, cards);
+  const monarch = next.units.find(unit => unit.id === '1:wandering-monarch');
+  assert.equal(monarch?.inactiveOnTurn, 0);
+  assert.equal(next.pendingResolution, undefined);
+  assert.equal(next.activePlayer, 2);
+  assert.equal(next.dashboard.some(row => row.causedByTriggerId === 'wandering-monarch:end-stride'), false);
 });
 
 test('Raven Prince End stun requires an enemy target within one hex', () => {
@@ -184,6 +193,68 @@ test('Frosthorn Yak Start Pull can target and move a friendly troop', () => {
   assert.equal(resolved.activePlayer, 1, 'the Start Pull returns to the same player normal action');
 });
 
+test('triggered actions make every source inactive, while life and mod remain non-actions', () => {
+  cards.set('trigger-actor', {
+    id: 'trigger-actor', name: 'Trigger Actor', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: [],
+    triggers: [{ id: 'shot', condition: { signal: 'start', subject: 'self' }, action: { kind: 'damage', amount: 1, range: 0, type: ['permanent'] } }]
+  });
+  cards.set('status-source', {
+    id: 'status-source', name: 'Status Source', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: [],
+    triggers: [
+      { id: 'life', condition: { signal: 'start', subject: 'self' }, action: { kind: 'life', amount: 1, range: 0 } },
+      { id: 'mod', condition: { signal: 'start', subject: 'self' }, action: { kind: 'modifier', amount: [1, 0], range: 0 } }
+    ]
+  });
+  const state = { activePlayer: 1, turnCounts: { 1: 2, 2: 0 }, units: [
+    { id: '1:trigger-actor', troopId: 'trigger-actor', owner: 1, coordinate: '0,1', permanentDamage: 0 },
+    { id: '1:status-source', troopId: 'status-source', owner: 1, coordinate: '1,1', permanentDamage: 1, inactiveUntilTurn: 3 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+
+  dispatchTrigger(state, { trigger: 'start', player: 1, troopIds: [] }, cards, [1]);
+  assert.equal(state.units[0].inactiveOnTurn, 0, 'an ordinary triggered effect consumes activity');
+  assert.equal(state.units[1].permanentDamage, 0, 'life still triggers from an inactive source');
+  assert.equal(state.units[1].shields?.[0]?.value, 1, 'mod still triggers from an inactive source');
+
+  dispatchTrigger(state, { trigger: 'start', player: 1, troopIds: [] }, cards, [1]);
+  assert.equal(state.units[0].permanentDamage, 1, 'the inactive source cannot repeat its action trigger');
+});
+
+test('life and maxlife change current and maximum health without exceeding the maximum', () => {
+  cards.set('life-source', {
+    id: 'life-source', name: 'Life Source', role: 'troop', baseHealth: 4, deploymentRegions: ['starting'], actions: [],
+    triggers: [
+      { id: 'max', condition: { signal: 'start', subject: 'self' }, action: { kind: 'maxlife', amount: -1, range: 0 } },
+      { id: 'life', condition: { signal: 'start', subject: 'self' }, action: { kind: 'life', amount: 9, range: 0 } }
+    ]
+  });
+  const state = { activePlayer: 1, units: [{ id: '1:life-source', troopId: 'life-source', owner: 1, coordinate: '0,1', permanentDamage: 2 }], effects: [], bashes: [], lastActingTroopId: {} };
+  dispatchTrigger(state, { trigger: 'start', player: 1, troopIds: [] }, cards, [1]);
+  assert.equal(state.units[0].maxLifeBonus, -1);
+  assert.equal(state.units[0].permanentDamage, 0);
+  assert.equal(combatSummary(state, '1:life-source', cards).health, 3);
+});
+
+test('an action performed during the opponent turn blocks the troop through its following turn', () => {
+  cards.set('opponent-turn-trigger', {
+    id: 'opponent-turn-trigger', name: 'Opponent Turn Trigger', role: 'troop', baseHealth: 4, deploymentRegions: ['starting'], actions: [],
+    triggers: [{ id: 'opponent-action', condition: { signal: 'start', subject: 'self' }, action: { kind: 'damage', amount: 1, range: 0, type: ['permanent'] } }]
+  });
+  const state = { activePlayer: 2, turnNumber: 1, units: [
+    { id: '1:opponent-turn-trigger', troopId: 'opponent-turn-trigger', owner: 1, coordinate: '1,1', permanentDamage: 0 },
+    { id: '2:squirrel-king', troopId: 'squirrel-king', owner: 2, coordinate: '-1,-1', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  dispatchTrigger(state, { trigger: 'start', player: 2, troopIds: [] }, cards, [1]);
+  assert.equal(state.units[0].inactiveOnTurn, 1);
+
+  const ownerTurn = applyGameAction(state, 2, { type: 'pass' }, cards);
+  assert.equal(availableActionsFor(ownerTurn, 1, 'opponent-turn-trigger', cards).length, 0);
+  const afterOwnerTurn = applyGameAction(ownerTurn, 1, { type: 'pass' }, cards);
+  assert.equal(afterOwnerTurn.units[0].inactiveOnTurn, 1, 'previous-opponent-turn activity is retained at this End');
+  const nextOwnerTurn = applyGameAction(afterOwnerTurn, 2, { type: 'pass' }, cards);
+  const reactivated = applyGameAction(nextOwnerTurn, 1, { type: 'pass' }, cards);
+  assert.equal(reactivated.units[0].inactiveOnTurn, undefined, 'older activity clears at the owner’s later End');
+});
+
 test('a Frosthorn Start Pull bash waits through the current combat phase and lets the next player flee', () => {
   const state = { activePlayer: 2, phase: 'action', units: [
     { id: '1:frosthorn-yak', troopId: 'frosthorn-yak', owner: 1, coordinate: '-1,1', permanentDamage: 0 },
@@ -230,7 +301,7 @@ test('dashboard stack instantiates a Squirrel King trigger as a nested action', 
   assert.ok(fire);
   assert.deepEqual(fire.targets, [{ hex: '1,0', units: [{ unitId: '2:coastal-heron', troopId: 'coastal-heron', owner: 2, health: 1 }] }]);
   assert.equal(heal.parentId, fire.id);
-  assert.deepEqual(heal.action, { kind: 'heal', amount: 1, range: 0 });
+  assert.deepEqual(heal.action, { kind: 'life', amount: 1, range: 0 });
   assert.deepEqual(heal.outcome, { healed: [{ unitId: '1:squirrel-king', amount: 1 }] });
   assert.equal(heal.status, 'resolved');
 });

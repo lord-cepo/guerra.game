@@ -10,5 +10,6 @@ export function createEngineCards() {
   cards.set('magic-defense-test', { id: 'magic-defense-test', name: 'Magic Defense Test', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: [{ kind: 'defense', amount: 2, range: 2, type: ['magic'] }] });
   cards.set('self-magic-defense-test', { id: 'self-magic-defense-test', name: 'Self Magic Defense Test', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: [], selfMagicDefense: 2 });
   cards.set('pierce-fire-test', { id: 'pierce-fire-test', name: 'Pierce Fire Test', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: [{ kind: 'fire', amount: 2, range: 2, type: ['pierce'] }] });
+  cards.set('tireless-test', { id: 'tireless-test', name: 'Tireless Test', role: 'troop', baseHealth: 2, deploymentRegions: ['starting'], actions: [{ kind: 'ranged', amount: 1, range: 3, type: ['tireless'] }] });
   return { cards, catalogueCards, troopSeeds };
 }

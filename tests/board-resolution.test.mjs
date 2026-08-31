@@ -65,3 +65,17 @@ test('a removed bash animates only when a new matching bashResolved event exists
   assert.equal(animation.winnerId, attacker.id);
   assert.deepEqual(animation.bash, bash);
 });
+
+test('a resolved bash that still has two survivors is presented as continuing', () => {
+  const attacker = unit('1:titanium', 'titanium', 1, '0,0', 1);
+  const defender = unit('2:queen', 'queen', 2, '0,0', 3);
+  const bash = { attackerId: attacker.id, defenderId: defender.id, target: '0,0' };
+  const previous = match({ units: [attacker, defender], bashes: [bash] });
+  const nextDefender = { ...defender, currentHealth: 2, permanentDamage: 1, combat: { ...defender.combat, health: 2, total: 2 } };
+  const resolved = match({ revision: 2, units: [attacker, nextDefender], bashes: [bash], triggerEvents: [{
+    trigger: 'bashResolved', player: 1, hex: '0,0', troopIds: [attacker.id, defender.id], attackerId: attacker.id, defenderId: defender.id,
+  }] });
+  const [animation] = resolvedBashAnimations(previous, resolved, options());
+  assert.equal(animation.continues, true);
+  assert.equal(animation.winnerId, undefined);
+});

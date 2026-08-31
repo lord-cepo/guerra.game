@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isBoardCoordinate } from '../dist/game/board.js';
-import { applyGameAction, availableActionsFor, combatSummary, controlSummary, createGameState, unitId } from '../dist/game/engine.js';
+import { applyGameAction, availableActionsFor, combatSummary, controlSummary, createGameState, isUnitInactive, maximumHealth, unitId } from '../dist/game/engine.js';
 
 const diagnosticSnapshotLimit = 100;
 
@@ -97,11 +97,13 @@ export class MatchStore {
       activePlayer: state.activePlayer,
       phase: state.phase ?? (state.pendingResolution ? 'end' : 'action'),
       winner: state.winner,
-      units: state.units.map(({ currentHealth: _currentHealth, combat: _combat, ...unit }) => unit),
+      units: state.units.map(({ currentHealth: _currentHealth, maxHealth: _maxHealth, inactive: _inactive, combat: _combat, ...unit }) => unit),
       effects: structuredClone(state.effects ?? []), bashes: structuredClone(state.bashes ?? []), bombs: structuredClone(state.bombs ?? []),
       pendingResolution: structuredClone(state.pendingResolution),
       pendingResolutionQueue: structuredClone(state.pendingResolutionQueue ?? []),
       lastActingTroopId: structuredClone(state.lastActingTroopId ?? {}),
+      turnCounts: structuredClone(state.turnCounts ?? {}),
+      turnNumber: state.turnNumber ?? 0,
       defeatedTroopIds: [...(state.defeatedTroopIds ?? [])], revision: state.revision ?? 0,
       events: structuredClone(state.events ?? []), triggerEvents: [],
       dashboard: structuredClone(state.dashboard ?? []), resolutionStack: [...(state.resolutionStack ?? [])], currentEventId: state.currentEventId, nextDashboardId: state.nextDashboardId ?? 1,
@@ -217,7 +219,7 @@ export class MatchStore {
         const id = unitId(unit);
         const bash = match.game.bashes.find(item => item.attackerId === id || item.defenderId === id);
         const combat = combatSummary(match.game, id, this.cardsById, bash?.target);
-        return { ...unit, id, currentHealth: combat.health, combat };
+        return { ...unit, id, currentHealth: combat.health, maxHealth: maximumHealth(unit, this.cardsById), inactive: isUnitInactive(match.game, unit), combat };
       }),
       defeatedTroopIds: [...(match.game.defeatedTroopIds ?? [])],
       effects: structuredClone(match.game.effects),
@@ -229,6 +231,8 @@ export class MatchStore {
       resolutionStack: [...(match.game.resolutionStack ?? [])],
       currentEventId: match.game.currentEventId,
       lastActingTroopId: { ...(match.game.lastActingTroopId ?? {}) },
+      turnCounts: { ...(match.game.turnCounts ?? {}) },
+      turnNumber: match.game.turnNumber ?? 0,
       winner: match.game.winner,
       control: controlSummary(match.game, this.cardsById),
       events: structuredClone(match.game.events?.slice(-100) ?? [])

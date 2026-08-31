@@ -2,6 +2,7 @@ import type { GameActionType } from './protocol.js';
 import { boardDescriptionEntries, type Troop } from './troop-view.js';
 import { hexGap, hexSize, horizontalScale, svgNamespace } from './board-geometry.js';
 import type { Point } from './board-animation-geometry.js';
+import type { Player } from '../game/types.js';
 
 export interface BoardDescriptionOptions {
   includeSelfBlock?: boolean;
@@ -42,7 +43,7 @@ export function boardDescriptionLineY(position: Point, lineCount: number, index:
   return position.y + 11 + (index - (hasModifier ? 2 : 1)) * boardDescriptionLineHeight;
 }
 
-function appendText(parent: SVGTSpanElement, text: string, magicShield = false): void {
+function appendPlainText(parent: SVGTSpanElement, text: string, magicShield = false): void {
   for (const token of text.split(emojiPattern).filter(Boolean)) {
     const span = document.createElementNS(svgNamespace, 'tspan');
     span.textContent = token;
@@ -54,9 +55,18 @@ function appendText(parent: SVGTSpanElement, text: string, magicShield = false):
   }
 }
 
-function appendMagicText(parent: SVGTSpanElement, text: string): void {
+function appendText(parent: SVGTSpanElement, text: string, magicShield = false, owner: Player = 1): void {
+  for (const part of text.split(/(\[\[(?:friend|enemy)(?:-dark)?:[^\]]+\]\])/u).filter(Boolean)) {
+    const marker = part.match(/^\[\[(friend|enemy)(-dark)?:([^\]]+)\]\]$/u);
+    if (!marker) { appendPlainText(parent, part, magicShield); continue; }
+    const player = marker[1] === 'friend' ? owner : owner === 1 ? 2 : 1;
+    const span = document.createElementNS(svgNamespace, 'tspan'); span.classList.add(`relation-player-${player}${marker[2] ? '-dark' : ''}`); span.textContent = marker[3]; parent.append(span);
+  }
+}
+
+function appendMagicText(parent: SVGTSpanElement, text: string, owner: Player): void {
   for (const part of text.split(/(~[^~]+~)/u).filter(Boolean)) {
-    if (!(part.startsWith('~') && part.endsWith('~'))) { appendText(parent, part); continue; }
+    if (!(part.startsWith('~') && part.endsWith('~'))) { appendText(parent, part, false, owner); continue; }
     const value = document.createElementNS(svgNamespace, 'tspan');
     value.classList.add('magic-modifier'); value.style.fill = '#c084fc'; value.textContent = part.slice(1, -1); parent.append(value);
   }
@@ -112,8 +122,8 @@ export function writeBoardDescription(marker: SVGTextElement, troop: Troop, posi
       const right = document.createElementNS(svgNamespace, 'tspan'); appendText(right, values[3]);
       if (line.staticLeft) left.classList.add('static-effect'); if (line.staticRight) right.classList.add('static-effect');
       row.append(left, middle, right); if (values[4]) appendText(row, values[4]);
-    } else if (line.magicModifier) appendMagicText(row, line.text);
-    else appendText(row, line.text, line.action === 'magic-defense' || line.action === 'self-magic-defense');
+    } else if (line.magicModifier) appendMagicText(row, line.text, troop.owner);
+    else appendText(row, line.text, line.action === 'magic-defense' || line.action === 'self-magic-defense', troop.owner);
     marker.append(row);
   }
 }

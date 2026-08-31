@@ -78,6 +78,14 @@ When changing order, inspect both empty and occupied targets, bashes, and action
 
 - `.board-troop` card artwork/fallback icon;
 - description fragments wrapped in `~...~` are rendered as purple magic modifiers with the markers removed;
+- trigger and continuous rows are generated from the catalogue DSL; condition/action words become the same compact icons used by active abilities, and `is-bash-by` is shown as `is ⚔️`;
+- generated friend/enemy words resolve to the card owner's or opponent's color in both HTML cards and SVG board rows. Friend/enemy hex operands use a dark-colored `⬢`, while a lone `deployed` continuous condition is visually implicit and omitted;
+- relationship words use the light Red/Blue palette and abbreviate `adjacent` to `adj`; the dark palette remains reserved for friend/enemy `⬢` operands;
+- deck-builder and match-side undeployed cards use a horizontal 3:2 box with larger two-line names and three effect rows over a left-to-right artwork readability gradient;
+- match-side cards retain the compact typography and stat sizes used before the horizontal redesign, while their copy and stat groups are positioned within the 3:2 artwork; deck-builder cards retain their larger independent sizing;
+- the card deployment band mirrors board-region colors: front-only cards use the same `#cbd5e1` grey as the uncontrolled front-line treatment;
+- side/deck card containers have no rectangular background, border, or shadow: artwork uses its soft edge mask and the sole visible outline is the `card_frame.png` layer scaled to 110%. The text gradient remains low-opacity, while the black troop emblem and health group are raised by 20% of card height;
+- normal cards are centered at 90% of their available grid width; deck-builder rows reserve additional vertical space for the 110% frame, and card typography is enlarged independently of that footprint;
 - a living troop that owns the current pending resolution receives a clipped yellow wash at `0.4` alpha inside its rigid unit visual;
 - inactive/last-acting styling may hide its ordinary overlay, but never the availability wash of a currently legal target; occupied endpoints therefore remain visible at the edge of an action's range;
 - the faded player-colored info frame;
@@ -184,13 +192,14 @@ When Move, Fly, or triggered Pull projects either Bash participant away, the old
 - Health and signed modifier are positioned inward.
 - Physical and magic Bash modifiers share one centered SVG text run, so the complete pair remains centered beneath health and cannot overflow toward the outside edge of either half.
 - Hovering a side expands that picture, centers its health/modifier, fades in its normal bottom information, and dissolves the opponent.
-- A Boar Warlord in a bash shows its ordinary permanent physical and magic modifiers in the split-bash stat rows; it gains +1 of each every time it enters a bash.
+- A Boar Warlord in a bash shows its temporary physical and magic modifiers in the split-bash stat rows; it gains +1 of each every time it enters a bash, and each is consumed by damage resolution of its kind.
 - The bottom-left hover card follows the same left/right side under the pointer, including direct crossings through the neutral split state.
 - Leaving reverses the transition. Crossing sides returns through the neutral split state before expanding the other side.
 - Legacy hover rendering must not rebuild a bash cell; doing so destroys the transition nodes.
 - The resolution presentation is gated by a newly added authoritative `bashResolved` trigger matching the bash participants and hex. A removed bash with `bashRetreat` (the defender fled) does not play slash or slider animation.
 - A resolved combat preserves the old split long enough to present events in order: an opponent-visible confirmed shield sequence when applicable, then the 1.5-second slash/health countdown using each side's compact `♥ actual` bash label, then a 420 ms slider collapse that clips out the defeated half and expands the winner. The transitional winner overlay then disappears, revealing the authoritative single-troop rendering with its normal `actual ♥ starting` health row. A tie collapses both halves.
 - A First Strike bash uses the authoritative resolution details to slash the enemy half first. If that troop survives, its health settles at the post-first-strike value and a second 1.5-second slash hits the First Strike half; if it dies, no second slash is shown. The existing shield and slider timing remains ahead of and after the ordered strikes.
+- Titanium treats Bash as physical damage: the Titanium troop receives none, retains its temporary physical modifier, and still deals its ordinary damage. When both troops survive, the split Bash remains visible and resolves again during the next eligible combat window. Two Titanium troops exchange no damage and remain in that repeating Bash; the resolution playback keeps both halves instead of running a winner-collapse animation.
 
 ### Bomb
 
@@ -245,14 +254,14 @@ When Move, Fly, or triggered Pull projects either Bash participant away, the old
 ### Defense and Self Defense
 
 - `shield-0.png` through `shield-6.png` form a one-shot seven-frame shield sequence centered on the protected hex.
-- Permanent physical or magic `+N` modifier changes do not play shield frames. Triggered physical shield additions, including Tortoise Emperor's adjacent End shelter, are detected from authoritative shield arrays and play the standard non-purple sequence on every recipient.
-- A confirmed shield is a property of the receiving troop, not of its hex. It follows the troop when the troop moves, survives opponent-end and unrelated magic/cannon/bomb resolution, and is consumed when a physical attack resolves over that troop or when the troop performs a true action. Optional/triggered resolution actions such as End: move 1 do not consume it.
+- Shield frames are reserved for explicit or triggered Shield/Magic Shield actions. A triggered `N mod P` status instead reveals `upgrade.png` from bottom to top and fades it: physical-only gains are grayscale, magic-only gains retain the original colors, and combined gains play the grayscale physical reveal followed by the colored magic reveal.
+- A confirmed non-continuous modifier is a property of the receiving troop, not of its hex. It follows the troop when the troop moves and is consumed only when damage of the matching physical or magic kind resolves against it; performing an action does not consume it. Continuous-line and control modifiers are derived live and remain unaffected.
 - A troop with a magic modifier shows its stats as `+physical +magic`, with the magic value colored purple and given the same dark stroke/paint order as the physical value; physical zero remains visible as `+0`, and there is no separate right-side shield icon. Printed trigger rows use the same purple treatment for their magic component. Magic Defense uses the same seven-frame shield sequence and allied flight as physical Defense with a purple filter for staged, confirmed-opponent, triggered-gain, and turn-replay presentation, without duplicating the confirming player's staged animation.
 - Magic Defense uses the same target highlighting and shield-sequence timing as Defense, but the sequence and persistent shield icon receive the purple magic filter. Self-Magic Defense is shown as a separate self action only when the card supports it.
 - Permanent event modifiers are rendered in the modifier line: physical values use the existing magenta treatment, magic values use purple, and a combined value is shown as `+M+N`. Static keyword passives such as Obsidian, Titanium, First Strike, and Steady derive their compact and full descriptions from the shared passive registry; they are catalogue rules rather than separate board overlays.
 - Triggered Frosthorn Pull choices use the existing Pull target/destination movement projection for either friendly or enemy troops and replay that displacement to the opponent after confirmation. Optional triggered Move uses the ordinary source/destination dissolve, instant/death ranged and instant Magic choices show their pending-origin projectile preview, and triggered Stun animates over its staged target before retaining the existing confirmed effect and click replay.
 - If multiple troops share a Bash hex and are legal Frosthorn Pull targets, choosing that hex opens an explicit troop chooser before confirmation instead of silently selecting the first participant.
-- Triggered shield gains include troops deployed in the same authoritative revision. Opponent-facing playback waits for the deployment entrance before showing the shield frames, while the acting player sees the gain immediately without replaying deployment.
+- Triggered Shield and modifier gains include troops deployed in the same authoritative revision. Opponent-facing playback waits for the deployment entrance before showing the appropriate shield or modifier animation, while the acting player sees the gain immediately without replaying deployment.
 - Every input-bearing triggered action includes a visible Skip control and can be skipped with Space. Start-trigger prompts explicitly say that resolving or skipping the trigger returns to the player's normal turn.
 - All shield frames are retained in preload images and explicitly decoded before the application becomes interactive. Their discrete display windows are only 150 ms, so starting downloads without awaiting decoding can otherwise skip or flash frames on the first shield playback.
 - Self Defense plays the sequence directly in the source troop's hex.

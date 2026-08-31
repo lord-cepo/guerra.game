@@ -23,6 +23,9 @@ export interface ServerUnitState {
   coordinate: Coordinate;
   permanentDamage: number;
   currentHealth: number;
+  maxHealth?: number;
+  maxLifeBonus?: number;
+  inactive?: boolean;
   rangedDamageBonus?: number;
   rangedRangeBonus?: number;
   bashModifierBonus?: number;
@@ -122,6 +125,8 @@ export interface ServerMatchState {
   resolutionStack: number[];
   currentEventId?: number;
   lastActingTroopId?: Partial<Record<Player, string>>;
+  turnCounts?: Partial<Record<Player, number>>;
+  turnNumber?: number;
   selections?: Partial<Record<Player, string>>;
   targetSelections?: Partial<Record<Player, ServerTargetSelection>>;
   legalActions?: Partial<Record<Player, ServerLegalAction[]>>;

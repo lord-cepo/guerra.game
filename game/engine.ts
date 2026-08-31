@@ -37,7 +37,7 @@ export type UnitId = `${Player}:${string}`;
 export type TurnPhase = 'start' | 'action' | 'action-resolve' | 'combat-resolve' | 'end';
 export interface Upgrade { ability: UpgradableAbility; left?: number; right?: number; sourceUnitId: UnitId; }
 export interface Shield { value: number; sourceUnitId?: UnitId; }
-export interface UnitState { id?: UnitId; troopId: string; owner: Player; coordinate: Coordinate; permanentDamage: number; rangedDamageBonus?: number; rangedRangeBonus?: number; combatModifierBonus?: number; bashModifierBonus?: number; magicModifierBonus?: number; stunnedTurns?: number; upgrades?: Upgrade[]; shields?: Shield[]; }
+export interface UnitState { id?: UnitId; troopId: string; owner: Player; coordinate: Coordinate; permanentDamage: number; maxLifeBonus?: number; /** Global turn on which this troop most recently performed an action. */ inactiveOnTurn?: number; /** Legacy persisted inactivity marker. */ inactiveUntilTurn?: number; rangedDamageBonus?: number; rangedRangeBonus?: number; combatModifierBonus?: number; bashModifierBonus?: number; magicModifierBonus?: number; stunnedTurns?: number; upgrades?: Upgrade[]; shields?: Shield[]; }
 export interface Effect { owner: Player; sourceTroopId: string; sourceUnitId?: UnitId; targetUnitId?: UnitId; kind: 'attack' | 'cannon' | 'gore' | 'bomb' | 'magic' | 'stun'; target: Coordinate; value: number; /** Pierce attacks ignore the target's physical modifier. */ pierce?: boolean; /** Source coordinate for a moving delayed action, or center of a bomb area effect. */ origin?: Coordinate; /** Final landing coordinate shared by every effect in a delayed Gore charge. */ goreDestination?: Coordinate; }
 export interface Bomb { owner: Player; sourceTroopId: string; coordinate: Coordinate; damage: number; pierce?: boolean; }
 interface Bash { attackerId: string; defenderId: string; target: Coordinate; /** A newly created bash cannot resolve until an End phase has completed. */ awaitingEnd?: boolean; }
@@ -90,13 +90,37 @@ export type PendingResolution = (
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'stun'; origin: Coordinate; turns: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceUnitId: UnitId; sourceTroopId: string; kind: 'trigger-pull'; distance: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'revive' }
-) & { stackActionId?: number; /** Start-trigger choices resume the same player's normal action phase. */ resumeTurn?: boolean };
-export interface GameState { activePlayer: Player; phase?: TurnPhase; winner?: Player; units: UnitState[]; effects: Effect[]; bashes: Bash[]; bombs?: Bomb[]; pendingResolution?: PendingResolution; pendingResolutionQueue?: PendingResolution[]; lastActingTroopId?: Partial<Record<Player, string>>; defeatedTroopIds?: string[]; revision?: number; events?: GameEvent[]; triggerEvents?: TriggerEvent[]; dashboard?: StackAction[]; resolutionStack?: number[]; currentEventId?: number; nextDashboardId?: number; deckOrder?: Partial<Record<Player, string[]>>; }
+) & { stackActionId?: number; /** Start-trigger choices resume the same player's normal action phase. */ resumeTurn?: boolean; /** The resolving action leaves its source active. */ tireless?: boolean };
+export interface GameState { activePlayer: Player; phase?: TurnPhase; winner?: Player; units: UnitState[]; effects: Effect[]; bashes: Bash[]; bombs?: Bomb[]; pendingResolution?: PendingResolution; pendingResolutionQueue?: PendingResolution[]; lastActingTroopId?: Partial<Record<Player, string>>; turnCounts?: Partial<Record<Player, number>>; turnNumber?: number; defeatedTroopIds?: string[]; revision?: number; events?: GameEvent[]; triggerEvents?: TriggerEvent[]; dashboard?: StackAction[]; resolutionStack?: number[]; currentEventId?: number; nextDashboardId?: number; deckOrder?: Partial<Record<Player, string[]>>; }
 
-export function createGameState(deckOrder?: Partial<Record<Player, string[]>>): GameState { return { activePlayer: 1, phase: 'action', units: [], effects: [], bashes: [], bombs: [], lastActingTroopId: {}, defeatedTroopIds: [], revision: 0, events: [], triggerEvents: [], dashboard: [], resolutionStack: [], nextDashboardId: 1, ...(deckOrder ? { deckOrder: structuredClone(deckOrder) } : {}) }; }
+export function createGameState(deckOrder?: Partial<Record<Player, string[]>>): GameState { return { activePlayer: 1, phase: 'action', units: [], effects: [], bashes: [], bombs: [], lastActingTroopId: {}, turnCounts: { 1: 0, 2: 0 }, turnNumber: 0, defeatedTroopIds: [], revision: 0, events: [], triggerEvents: [], dashboard: [], resolutionStack: [], nextDashboardId: 1, ...(deckOrder ? { deckOrder: structuredClone(deckOrder) } : {}) }; }
 export function unitId(unit: Pick<UnitState, 'owner' | 'troopId' | 'id'>): UnitId { return unit.id ?? `${unit.owner}:${unit.troopId}`; }
 function findUnit(state: GameState, id: string): UnitState | undefined { return state.units.find(unit => unit.id === id || unitId(unit) === id || (!unit.id && unit.troopId === id)); }
-function health(unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): number { return Math.max(0, (cards.get(unit.troopId)?.baseHealth ?? 0) - unit.permanentDamage); }
+export function maximumHealth(unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): number { return Math.max(0, (cards.get(unit.troopId)?.baseHealth ?? 0) + (unit.maxLifeBonus ?? 0)); }
+function health(unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): number { return Math.max(0, maximumHealth(unit, cards) - unit.permanentDamage); }
+export function isUnitInactive(state: GameState, unit: UnitState): boolean {
+  if (unit.inactiveOnTurn !== undefined || unit.inactiveUntilTurn !== undefined) return true;
+  return state.lastActingTroopId?.[unit.owner] === unit.troopId;
+}
+function markUnitInactive(state: GameState, unit: UnitState): void {
+  unit.inactiveOnTurn = state.turnNumber ?? 0;
+  delete unit.inactiveUntilTurn;
+  state.lastActingTroopId ??= {};
+  state.lastActingTroopId[unit.owner] = unit.troopId;
+}
+function reactivateEligibleTroopsAtTurnEnd(state: GameState, player: Player): void {
+  const oldestRetainedTurn = (state.turnNumber ?? 0) - 1;
+  for (const unit of state.units.filter(candidate => candidate.owner === player)) {
+    const actedOn = unit.inactiveOnTurn;
+    if (actedOn !== undefined && actedOn < oldestRetainedTurn) delete unit.inactiveOnTurn;
+    if (actedOn === undefined && unit.inactiveUntilTurn !== undefined) delete unit.inactiveUntilTurn;
+  }
+}
+function beginTurn(state: GameState, player: Player): void {
+  state.turnNumber = (state.turnNumber ?? 0) + 1;
+  state.turnCounts ??= {};
+  state.turnCounts[player] = (state.turnCounts[player] ?? 0) + 1;
+}
 export interface ModifierEntry { label: string; value: number; }
 export interface CombatSummary {
   health: number;
@@ -270,15 +294,20 @@ function addShield(unit: UnitState, value: number, sourceUnitId: UnitId): void {
   unit.shields = [...(unit.shields ?? []), { value, sourceUnitId }];
 }
 function addMagicModifier(unit: UnitState, value: number): void { unit.magicModifierBonus = (unit.magicModifierBonus ?? 0) + value; }
-function clearShield(unit: UnitState): void { delete unit.shields; }
+function clearShield(unit: UnitState): void {
+  delete unit.shields;
+  delete unit.combatModifierBonus;
+  delete unit.bashModifierBonus;
+}
+function addTemporaryModifiers(unit: UnitState, physical: number, magic: number, sourceUnitId: UnitId): void {
+  if (physical) addShield(unit, physical, sourceUnitId);
+  if (magic) addMagicModifier(unit, magic);
+}
 function clearStunAtTurnEnd(state: GameState, player: Player): void {
   for (const unit of state.units.filter(candidate => candidate.owner === player && (candidate.stunnedTurns ?? 0) > 0)) {
     unit.stunnedTurns = (unit.stunnedTurns ?? 1) - 1;
     if (unit.stunnedTurns <= 0) delete unit.stunnedTurns;
   }
-}
-function isTrueAction(action: GameAction): boolean {
-  return ['move', 'fly', 'attack', 'cannon', 'gore', 'bomb', 'push', 'pull', 'stun', 'magic', 'mending', 'upgrade', 'defense', 'magic-defense', 'self-defense', 'self-magic-defense'].includes(action.type);
 }
 /** Immediate abilities spend their upgrade straight away. Delayed attacks keep
  * it visible until their pending effect is actually resolved next turn. */
@@ -427,13 +456,13 @@ function remove(state: GameState, unit: UnitState, cards: ReadonlyMap<string, Tr
     const resolution = trigger.action;
     const row = appendStackAction(state, cards, { parentId: state.currentEventId, causedByTriggerId: `${troop.id}:${trigger.id}`, status: 'ready', phase: state.phase ?? 'combat-resolve', activePlayer: state.activePlayer, controller: unit.owner, sourceUnitId: unitId(unit), signal: 'death', action: structuredClone(resolution), targetHexes: [deathHex], targets: [{ hex: deathHex, units: [{ unitId: unitId(unit), troopId: unit.troopId, owner: unit.owner, health: 0 }] }] });
     if (resolution.kind === 'ranged' && !resolution.type?.includes('instant') && state.units.some(target => target.owner !== unit.owner && hexDistance(deathHex, target.coordinate) <= resolution.range)) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: state.activePlayer, sourceTroopId: unit.troopId, kind: 'death-attack', origin: deathHex, damage: amount(resolution) ?? 0, range: resolution.range, stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: state.activePlayer, sourceTroopId: unit.troopId, kind: 'death-attack', origin: deathHex, damage: amount(resolution) ?? 0, range: resolution.range, ...(resolution.type?.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
     }
     if (resolution.kind === 'ranged' && resolution.type?.includes('instant')) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: state.activePlayer, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: deathHex, damage: amount(resolution) ?? 0, range: resolution.range, remaining: amount(resolution, 1) ?? 1, ...(resolution.type.includes('optional') ? { optional: true } : {}), stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: state.activePlayer, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: deathHex, damage: amount(resolution) ?? 0, range: resolution.range, remaining: amount(resolution, 1) ?? 1, ...(resolution.type.includes('optional') ? { optional: true } : {}), ...(resolution.type.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
     }
     if (resolution.kind === 'revive' && state.defeatedTroopIds.some(id => id !== unitId(unit) && id.startsWith(`${unit.owner}:`) && cards.get(id.split(':').slice(1).join(':'))?.role !== 'hero')) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: state.activePlayer, sourceTroopId: unit.troopId, kind: 'revive', stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: state.activePlayer, sourceTroopId: unit.troopId, kind: 'revive', ...(resolution.type?.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
     }
     if (row.status !== 'waiting-input') finishStackAction(state, row.id);
   }
@@ -459,26 +488,44 @@ function triggerMatches(trigger: TriggerDefinition, unit: UnitState, event: Trig
 
 function resolveTriggeredAction(state: GameState, unit: UnitState, event: TriggerEvent, trigger: TriggerDefinition, cards: ReadonlyMap<string, TroopSeed>, row: StackAction): void {
     const action = trigger.action;
-    if (action.kind === 'heal') { const value = amount(action) ?? 0; unit.permanentDamage = Math.max(0, unit.permanentDamage - value); row.outcome = { healed: [{ unitId: unitId(unit), amount: value }] }; }
+    let performedAction = false;
+    if (action.kind === 'life') {
+      const value = amount(action) ?? 0;
+      const before = health(unit, cards);
+      unit.permanentDamage = Math.max(0, unit.permanentDamage - value);
+      const after = health(unit, cards);
+      row.outcome = after >= before ? { healed: [{ unitId: unitId(unit), amount: after - before }] } : { damaged: [{ unitId: unitId(unit), amount: before - after }] };
+      if (after === 0) remove(state, unit, cards);
+    }
+    else if (action.kind === 'maxlife') {
+      const before = health(unit, cards);
+      unit.maxLifeBonus = (unit.maxLifeBonus ?? 0) + (amount(action) ?? 0);
+      const after = health(unit, cards);
+      row.outcome = after >= before ? { healed: [{ unitId: unitId(unit), amount: after - before }] } : { damaged: [{ unitId: unitId(unit), amount: before - after }] };
+      if (after === 0) remove(state, unit, cards);
+    }
+    else if (action.kind === 'heal') { const value = amount(action) ?? 0; unit.permanentDamage = Math.max(0, unit.permanentDamage - value); row.outcome = { healed: [{ unitId: unitId(unit), amount: value }] }; performedAction = true; }
     else if (action.kind === 'upgrade' && action.type?.includes('permanent') && action.type.includes('attack')) {
       unit.rangedDamageBonus = (unit.rangedDamageBonus ?? 0) + (amount(action) ?? 0);
       unit.rangedRangeBonus = (unit.rangedRangeBonus ?? 0) + (amount(action, 1) ?? 0);
+      performedAction = true;
     }
     else if (action.kind === 'damage' && action.type?.includes('permanent')) {
       const value = amount(action) ?? 0; unit.permanentDamage += value; row.outcome = { damaged: [{ unitId: unitId(unit), amount: value }] };
       if (health(unit, cards) === 0) remove(state, unit, cards);
+      performedAction = true;
     }
-    else if (action.kind === 'modifier' && action.type?.includes('permanent') && action.type.includes('bash')) unit.bashModifierBonus = (unit.bashModifierBonus ?? 0) + (amount(action) ?? 0);
-    else if (action.kind === 'modifier' && action.type?.includes('permanent') && action.type.includes('magic')) unit.magicModifierBonus = (unit.magicModifierBonus ?? 0) + (amount(action) ?? 0);
-    else if (action.kind === 'modifier' && action.type?.includes('permanent') && !action.type.includes('bash')) {
-      unit.combatModifierBonus = (unit.combatModifierBonus ?? 0) + (amount(action) ?? 0);
-      if (Array.isArray(action.amount)) unit.magicModifierBonus = (unit.magicModifierBonus ?? 0) + (amount(action, 1) ?? 0);
+    else if (action.kind === 'modifier') {
+      const targets = action.type?.includes('adjacent')
+        ? adjacentCoordinates(unit.coordinate).map(coordinate => at(state, coordinate)).filter((target): target is UnitState => target?.owner === unit.owner)
+        : [unit];
+      for (const target of targets) addTemporaryModifiers(target, amount(action) ?? 0, amount(action, 1) ?? 0, unitId(unit));
     }
     else if (action.kind === 'ranged' && action.type?.includes('instant') && event.player === unit.owner) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, remaining: amount(action, 1) ?? 1, ...(action.type.includes('optional') ? { optional: true } : {}), stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, remaining: amount(action, 1) ?? 1, ...(action.type.includes('optional') ? { optional: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
     }
     else if (action.kind === 'fire' && action.type?.includes('instant') && event.player === unit.owner) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'instant-magic', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, ...(action.type.includes('pierce') ? { pierce: true } : {}), stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'instant-magic', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, ...(action.type.includes('pierce') ? { pierce: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
     }
     else if (action.kind === 'stun' && event.targetUnitId && event.player === unit.owner) {
       const target = findUnit(state, event.targetUnitId);
@@ -486,18 +533,19 @@ function resolveTriggeredAction(state: GameState, unit: UnitState, event: Trigge
         target.stunnedTurns = Math.max(target.stunnedTurns ?? 0, amount(action) ?? 0);
         clearShield(target); target.magicModifierBonus = undefined; target.combatModifierBonus = undefined; target.bashModifierBonus = undefined;
         state.effects.push({ owner: unit.owner, sourceTroopId: unit.troopId, sourceUnitId: unitId(unit), targetUnitId: unitId(target), kind: 'stun', target: target.coordinate, value: amount(action) ?? 0 });
+        performedAction = true;
       }
     }
     else if (action.kind === 'stun' && event.player === unit.owner) {
       if (stunTargets(state, unit.owner, unit.coordinate, action.range).length) {
         row.status = 'waiting-input';
-        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'stun', origin: unit.coordinate, turns: amount(action) ?? 0, range: action.range, stackActionId: row.id });
+        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceTroopId: unit.troopId, kind: 'stun', origin: unit.coordinate, turns: amount(action) ?? 0, range: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
       }
     }
     else if (action.kind === 'pull' && event.player === unit.owner) {
       if (pullTargets(state, unit, amount(action) ?? 0, action.range).length) {
         row.status = 'waiting-input';
-        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'trigger-pull', distance: amount(action) ?? 0, range: action.range, stackActionId: row.id });
+        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'trigger-pull', distance: amount(action) ?? 0, range: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
       }
     }
     else if (action.kind === 'defense' && action.type?.includes('adjacent') && event.player === unit.owner) {
@@ -506,14 +554,16 @@ function resolveTriggeredAction(state: GameState, unit: UnitState, event: Trigge
         if (ally?.owner !== unit.owner) continue;
         addShield(ally, amount(action) ?? 0, unitId(unit));
       }
+      performedAction = true;
     }
     // Triggered moves are always optional (declinable) unless a future type
     // qualifier marks them mandatory. The pending choice owns the Skip action.
     else if (action.kind === 'move' && event.player === unit.owner) {
       if (optionalMoveTargets(state, unit, action.range).length) {
-        row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'optional-move', distance: action.range, stackActionId: row.id });
+        row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.player, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'optional-move', distance: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), stackActionId: row.id });
       }
     }
+    if (performedAction && !action.type?.includes('tireless') && state.units.includes(unit)) markUnitInactive(state, unit);
 }
 
 export function registerPassive(trigger: Trigger, troopId: string, handler: PassiveHandler): () => void {
@@ -546,7 +596,10 @@ export function dispatchTrigger(state: GameState, event: TriggerEvent, cards: Re
   });
   const parentId = state.currentEventId;
   const activeAction = state.dashboard?.find(row => row.id === parentId)?.action;
-  const matches = units.flatMap(unit => (card(cards, unit.troopId).triggers ?? []).filter(trigger => triggerMatches(trigger, unit, event, activeAction)).map(trigger => ({ unit, trigger })));
+  const isStatusEffect = (action: CardAction): boolean => action.kind === 'modifier' || action.kind === 'life' || action.kind === 'maxlife';
+  const matches = units.flatMap(unit => (card(cards, unit.troopId).triggers ?? []).filter(trigger =>
+    triggerMatches(trigger, unit, event, activeAction) && (!isUnitInactive(state, unit) || isStatusEffect(trigger.action))
+  ).map(trigger => ({ unit, trigger })));
   const rows = matches.map(({ unit, trigger }) => appendStackAction(state, cards, {
     ...(parentId ? { parentId } : {}), causedByTriggerId: `${unit.troopId}:${trigger.id}`, status: 'ready', phase: state.phase ?? 'action-resolve', activePlayer: state.activePlayer, controller: unit.owner, sourceUnitId: unitId(unit), signal: event.trigger, action: structuredClone(trigger.action), targetHexes: event.hex ? [event.hex] : []
   }));
@@ -602,7 +655,7 @@ export function availableActionsFor(state: GameState, player: Player, troopId: s
   }
   const troop = cards.get(troopId);
   const deployedUnit = state.units.find(item => item.owner === player && item.troopId === troopId);
-  if (!troop || state.winner || state.activePlayer !== player || state.lastActingTroopId?.[player] === troopId || (deployedUnit?.stunnedTurns ?? 0) > 0 || state.defeatedTroopIds?.includes(`${player}:${troopId}`)) return [];
+  if (!troop || state.winner || state.activePlayer !== player || (deployedUnit ? isUnitInactive(state, deployedUnit) : state.lastActingTroopId?.[player] === troopId) || (deployedUnit?.stunnedTurns ?? 0) > 0 || state.defeatedTroopIds?.includes(`${player}:${troopId}`)) return [];
   const unit = deployedUnit;
   const available: GameAction[] = [];
   const addIfAccepted = (action: GameAction): void => {
@@ -748,6 +801,10 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     } else if (action.type !== 'resolve-pass') {
       throw new Error('This resolution does not support that action.');
     }
+    if (action.type !== 'resolve-pass' && !pending.tireless) {
+      const source = state.units.find(unit => unit.owner === player && unit.troopId === pending.sourceTroopId);
+      if (source) markUnitInactive(state, source);
+    }
     state.pendingResolution = state.pendingResolutionQueue?.shift();
     if (!state.pendingResolution) state.pendingResolutionQueue = [];
     if (pending.stackActionId && state.pendingResolution?.stackActionId !== pending.stackActionId) finishStackAction(state, pending.stackActionId);
@@ -766,8 +823,10 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     completeEndForBashes(state);
     dispatchTrigger(state, { trigger: 'opponentEnd', player: turnPlayer, troopIds: [], actingTroopId: pending.sourceTroopId }, cards, [opponentOfTurnPlayer]);
     finishOpenStack(state);
+    reactivateEligibleTroopsAtTurnEnd(state, turnPlayer);
     clearStunAtTurnEnd(state, turnPlayer);
     state.activePlayer = turnPlayer === 1 ? 2 : 1;
+    beginTurn(state, state.activePlayer);
     const startRow = recordPhase(state, 'start', cards);
     dispatchTrigger(state, { trigger: 'start', player: state.activePlayer, troopIds: [] }, cards, [state.activePlayer]);
     dispatchTrigger(state, { trigger: 'opponentStart', player: state.activePlayer, troopIds: [] }, cards, [turnPlayer]);
@@ -797,8 +856,10 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     completeEndForBashes(state);
     dispatchTrigger(state, { ...turnEvent, trigger: 'opponentEnd' }, cards, [opponent]);
     finishStackAction(state, endRow.id); finishStackAction(state, commandRow.id);
+    reactivateEligibleTroopsAtTurnEnd(state, player);
     clearStunAtTurnEnd(state, player);
     state.activePlayer = player === 1 ? 2 : 1;
+    beginTurn(state, state.activePlayer);
     const nextPlayer = state.activePlayer;
     const startRow = recordPhase(state, 'start', cards);
     dispatchTrigger(state, { trigger: 'start', player: nextPlayer, troopIds: [] }, cards, [nextPlayer]);
@@ -807,7 +868,8 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     return state;
   }
   if (action.type === 'resolve-move' || action.type === 'resolve-death-attack' || action.type === 'resolve-instant-ranged' || action.type === 'resolve-instant-magic' || action.type === 'resolve-stun' || action.type === 'resolve-pull' || action.type === 'resolve-revive' || action.type === 'resolve-pass') throw new Error('There is no pending event action.');
-  if (state.lastActingTroopId?.[player] === action.troopId) throw new Error('This troop acted on your previous turn.');
+  const inactivityCandidate = state.units.find(item => item.owner === player && item.troopId === action.troopId);
+  if (inactivityCandidate ? isUnitInactive(state, inactivityCandidate) : state.lastActingTroopId?.[player] === action.troopId) throw new Error('This troop is inactive.');
   if (action.type !== 'self-defense' && action.type !== 'self-magic-defense' && !isBoardCoordinate(action.coordinate)) throw new Error('Invalid hex.');
   const troop = card(cards, action.troopId);
   const unit = state.units.find(item => item.owner === player && item.troopId === action.troopId);
@@ -828,9 +890,6 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     dispatchTrigger(state, { trigger: 'deploy', player, hex: action.coordinate, troopIds: [`${player}:${action.troopId}`], actingTroopId: action.troopId }, cards, [player]);
   } else {
     if (!unit) throw new Error('Your troop is not deployed.');
-    // A real troop action consumes that troop's existing shield. Resolution
-    // actions (resolve-move, resolve-death-attack, etc.) never reach here.
-    if (isTrueAction(action)) clearShield(unit);
     if (action.type === 'move' || action.type === 'fly') {
       const maxDistance = action.type === 'move' ? moveRange(state, troop, unit, cards) : flyRange(troop, unit);
       if (hexDistance(unit.coordinate, action.coordinate) > maxDistance || (action.type === 'move' && !hasFreePath(state, unit.coordinate, action.coordinate, maxDistance))) throw new Error(action.type === 'fly' ? 'Flight destination is out of range.' : 'Move has no free path.');
@@ -950,6 +1009,7 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
         const printedAttack = actionOfType(troop, 'attack');
         if (printedAttack?.qualifiers?.includes('instant')) {
           if (offensiveTarget && offensiveTarget.owner !== player && !hasPassive(cards.get(offensiveTarget.troopId), 'titanium')) {
+            dispatchTrigger(state, { trigger: 'attackResolved', player, hex: action.coordinate, troopIds: [unitId(unit), unitId(offensiveTarget)], actingTroopId: unit.troopId, targetUnitId: unitId(offensiveTarget), actionKind: 'ranged' }, cards, [player]);
             const damage = Math.max(0, attackDamage(state, troop, unit, cards) - (printedAttack.qualifiers.includes('pierce') ? 0 : modifier(state, offensiveTarget, cards)));
             offensiveTarget.permanentDamage += damage;
             clearShield(offensiveTarget);
@@ -1009,12 +1069,22 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
   resolveAfterDefenderAction(state, player, cards, bashesReadyToResolve);
   const actingUnit = state.units.find(item => item.owner === player && item.troopId === action.troopId);
   const turnEvent = { player, hex: actingUnit?.coordinate ?? ('coordinate' in action ? action.coordinate : undefined), troopIds: actingUnit ? [unitId(actingUnit)] : [], actingTroopId: action.troopId };
+  // The troop may finish triggers caused directly by its chosen action, but
+  // it is inactive before the End window opens. This prevents a deployment
+  // (for example Wandering Monarch) from also taking an End-triggered action
+  // during the same turn.
+  const tireless = commandRow.action.type?.includes('tireless') ?? false;
+  if (actingUnit && !tireless) markUnitInactive(state, actingUnit);
+  else {
+    if (!actingUnit && !tireless) {
+      state.lastActingTroopId ??= {};
+      state.lastActingTroopId[player] = action.troopId;
+    }
+  }
   // Combat completes before end-of-turn passives. Own and opponent triggers
   // are deliberately separate, so a card can opt into exactly one of them.
   const endRow = recordPhase(state, 'end', cards);
   dispatchTrigger(state, { ...turnEvent, trigger: 'end' }, cards, [player]);
-  state.lastActingTroopId ??= {};
-  state.lastActingTroopId[player] = action.troopId;
   state.revision = (state.revision ?? 0) + 1;
   state.events ??= [];
   state.events.push({ revision: state.revision, player, action: structuredClone(action), ...(vacatedCoordinate ? { origin: vacatedCoordinate } : {}) });
@@ -1023,8 +1093,10 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
   completeEndForBashes(state);
   dispatchTrigger(state, { ...turnEvent, trigger: 'opponentEnd' }, cards, [opponent]);
   finishStackAction(state, endRow.id); finishStackAction(state, commandRow.id);
+  reactivateEligibleTroopsAtTurnEnd(state, player);
   clearStunAtTurnEnd(state, player);
   state.activePlayer = player === 1 ? 2 : 1;
+  beginTurn(state, state.activePlayer);
   const nextPlayer = state.activePlayer;
   const startRow = recordPhase(state, 'start', cards);
   dispatchTrigger(state, { trigger: 'start', player: nextPlayer, troopIds: [] }, cards, [nextPlayer]);
@@ -1048,6 +1120,10 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
       // Titanium prevents the physical hit itself, so an existing shield is
       // not contacted or consumed.
       if (hasPassive(cards.get(unit.troopId), 'titanium')) continue;
+      if (effect.sourceUnitId) {
+        const source = findUnit(state, effect.sourceUnitId);
+        if (source) dispatchTrigger(state, { trigger: 'attackResolved', player: effect.owner, hex: effect.target, troopIds: [unitId(source), unitId(unit)], actingTroopId: source.troopId, targetUnitId: unitId(unit), actionKind: effect.kind === 'gore' ? 'gore' : 'ranged' }, cards, [effect.owner]);
+      }
       const damage = Math.max(0, effect.value - (effect.pierce ? 0 : modifier(state, unit, cards)));
       unit.permanentDamage += damage;
       // A physical ranged attack consumes the shield on the troop it actually
@@ -1112,9 +1188,23 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
     const defenderModifier = modifier(state, originalDefender, cards, attackerVirtual);
     const attackerPower = health(attacker, cards) + attackerModifier;
     const defenderPower = health(originalDefender, cards) + defenderModifier;
+    const attackerTitanium = hasPassive(cards.get(attacker.troopId), 'titanium');
+    const defenderTitanium = hasPassive(cards.get(originalDefender.troopId), 'titanium');
     const firstStrikeUnit = [attacker, originalDefender].find(unit => hasPassive(cards.get(unit.troopId), 'first-strike'));
     let firstStrike: TriggerEvent['firstStrike'];
-    if (firstStrikeUnit) {
+    if (attackerTitanium || defenderTitanium) {
+      // Bash exchanges physical damage. Titanium prevents only the damage
+      // received by its bearer; it neither increases combat power nor awards
+      // the collision. If both troops survive, the bash remains pending for
+      // the next combat window after an End phase.
+      const attackerDamage = attackerTitanium ? 0 : Math.max(0, defenderPower - attackerModifier);
+      const defenderDamage = defenderTitanium ? 0 : Math.max(0, attackerPower - defenderModifier);
+      attacker.permanentDamage += attackerDamage;
+      originalDefender.permanentDamage += defenderDamage;
+      if (health(attacker, cards) === 0) remove(state, attacker, cards);
+      if (health(originalDefender, cards) === 0) remove(state, originalDefender, cards);
+      if (state.units.includes(attacker) && !state.units.includes(originalDefender)) attacker.coordinate = bash.target;
+    } else if (firstStrikeUnit) {
       const firstStrikeTarget = firstStrikeUnit === attacker ? originalDefender : attacker;
       const firstStrikeVirtual = { ...firstStrikeUnit, coordinate: bash.target };
       const targetVirtual = { ...firstStrikeTarget, coordinate: bash.target };
@@ -1151,10 +1241,11 @@ function resolveAfterDefenderAction(state: GameState, defender: Player, cards: R
       if (winner === attacker && state.units.includes(winner)) winner.coordinate = bash.target;
     }
     const survivingParticipants = [attacker, originalDefender].filter(unit => state.units.includes(unit));
-    clearShield(attacker);
-    clearShield(originalDefender);
-        dispatchTrigger(state, { trigger: 'bashResolved', player: attacker.owner, hex: bash.target, troopIds: survivingParticipants.map(unitId), attackerId: unitId(attacker), defenderId: unitId(originalDefender), ...(firstStrike ? { firstStrike } : {}) }, cards, [...new Set(survivingParticipants.map(unit => unit.owner))]);
-    state.bashes = state.bashes.filter(item => item !== bash);
+    if (!attackerTitanium) clearShield(attacker);
+    if (!defenderTitanium) clearShield(originalDefender);
+    dispatchTrigger(state, { trigger: 'bashResolved', player: attacker.owner, hex: bash.target, troopIds: survivingParticipants.map(unitId), attackerId: unitId(attacker), defenderId: unitId(originalDefender), ...(firstStrike ? { firstStrike } : {}) }, cards, [...new Set(survivingParticipants.map(unit => unit.owner))]);
+    if (survivingParticipants.length === 2) bash.awaitingEnd = true;
+    else state.bashes = state.bashes.filter(item => item !== bash);
   }
   // Keep only the defending player's unresolved effects. Shields live on
   // troops now, so they are consumed at the exact troop-resolution points
