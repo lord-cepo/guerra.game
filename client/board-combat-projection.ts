@@ -4,7 +4,7 @@ import { signedModifier } from './board-descriptions.js';
 import type { ServerMovementPreview } from './board-preview-projection.js';
 import type { HexGridState } from './hex-grid-state.js';
 import type { GameActionType, ServerBashState, ServerMatchState, ServerUnitState } from './protocol.js';
-import { actionOfType, catalogueById, healthOf, upgradeBonus, type Troop } from './troop-view.js';
+import { actionOfType, healthOf, upgradeBonus, type Troop } from './troop-view.js';
 
 interface BoardCombatProjectionContext {
   board: SVGSVGElement;
@@ -113,34 +113,14 @@ function serverPreviewMagicBlock(unit: ServerUnitState, coordinate: Coordinate):
 function serverModifierEntries(unit: ServerUnitState, coordinate: Coordinate, bash?: ServerBashState): Array<{ label: string; value: number }> {
   if (!state.serverMatch) return [];
   if (serverBashHasSteadyOpponent(unit, bash)) return [];
-  const entries: Array<{ label: string; value: number }> = [];
+  const entries: Array<{ label: string; value: number }> = unit.combat.modifiers
+    .filter(entry => entry.label !== 'Shield' && entry.label !== 'Control')
+    .map(entry => ({ ...entry }));
   const confirmedShields = unit.shields ?? [];
   const confirmedBlock = confirmedShields.reduce((sum, shield) => sum + shield.value, 0);
   const previewBlock = serverPreviewBlock(unit, coordinate);
   const block = confirmedBlock + previewBlock;
   if (block) entries.push({ label: 'Shield', value: block });
-  const previewShieldSources = serverPreviewTargets()
-    .filter(({ owner, target }) => owner === unit.owner && target.coordinate === coordinate && (target.type === 'defense' || target.type === 'self-defense'))
-    .map(({ owner, target }) => state.serverMatch?.units.find(candidate => candidate.owner === owner && candidate.troopId === target.troopId))
-    .filter((source): source is ServerUnitState => Boolean(source));
-  const shieldedByAlly = confirmedShields.some(shield => shield.sourceUnitId !== undefined && shield.sourceUnitId !== unit.id)
-    || previewShieldSources.some(source => source.id !== unit.id);
-  for (const source of state.serverMatch.units.filter(candidate => candidate.owner === unit.owner)) {
-    for (const effect of catalogueById.get(source.troopId)?.continuousEffects ?? []) {
-      if (effect.kind !== 'combat-modifier' || (effect.scope ?? 'self') === 'self' && source.id !== unit.id) continue;
-      const defender = bash ? state.serverMatch.units.find(candidate => candidate.id === bash.defenderId) : undefined;
-      const active = effect.condition === 'bash-attacker' ? bash?.attackerId === unit.id
-        : effect.condition === 'bash-attacker-vs-hero' ? bash?.attackerId === unit.id && catalogueById.get(defender?.troopId ?? '')?.role === 'hero'
-        : effect.condition === 'in-bash' ? Boolean(bash)
-        : effect.condition === 'injured' ? unit.permanentDamage > 0
-        : effect.condition === 'shielded' ? block > 0
-        : effect.condition === 'shielded-by-ally' ? shieldedByAlly
-        : false;
-      if (!active) continue;
-      const growth = source.id === unit.id && effect.condition === 'in-bash' ? unit.bashModifierBonus ?? 0 : 0;
-      entries.push({ label: effect.label, value: effect.value + growth });
-    }
-  }
   if (bash && serverControllerWithPreview(coordinate, bash) === unit.owner) entries.push({ label: 'Control', value: 1 });
   return entries;
 }

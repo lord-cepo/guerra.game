@@ -18,7 +18,11 @@ Deterministic rules engine (`game/`)
 Local JSON persistence (`data/`)
 ```
 
-The browser projects previews for interaction, but the server owns confirmed state and legal actions.
+The server owns confirmed state, legal actions, effective rule state, and
+revision-bound semantic previews. The browser retains local hover and
+presentation work and reconciles every preview against the next authoritative
+snapshot. The catalogue and lifecycle use the normalized rule engine exclusively.
+See `docs/rule-engine-migration.md`.
 
 ## Source map
 
@@ -28,15 +32,9 @@ The browser projects previews for interaction, but the server owns confirmed sta
   - Axial coordinate strings and validation.
   - Playable coordinates, regions, adjacency, distances, and straight lines.
 - `game/cards.ts`
-  - Human-readable troop catalogue DSL.
-  - Action, trigger, passive, upgrade, and deployment definitions compiled by
-    `game/card-parser.ts` into normalized engine data. Commas separate actions
-    or trigger rules, `:` separates a trigger condition and action, `::`
-    separates a continuous condition and status, and `&` separates multiple
-    effects of one trigger; `+` remains part of magenta upgrades.
-  - The same parser phrases generate compact trigger and continuous-effect
-    summaries, including action icons and all `&`-joined effects; catalogue
-    cards no longer require a separate hand-maintained trigger-text table.
+  - Human-readable troop catalogue definitions and normalized rule strings.
+  - `game/card-parser.ts` compiles function-form printed actions, passives, upgrades, and
+    deployment data; `game/rule-parser.ts` exclusively compiles card rules.
     Semantic friend/enemy fragments are retained as lightweight presentation
     markers so HTML and SVG renderers can resolve their colors from card owner.
   - `hit` compiles to an `attackResolved` event emitted whenever physical
@@ -44,13 +42,27 @@ The browser projects previews for interaction, but the server owns confirmed sta
     existing successful-attack event and therefore requires positive damage.
   - `game/rule-parser.ts` implements the typed AST parser for the normalized
     grammar documented in `docs/rule-language.md`. Trigger and continuous rules,
-    snapshot and historical conditions, event consequences, stored lifetimes,
-    and derived contributions have distinct nodes. `game/rule-vocabulary.ts`
+    snapshot and historical conditions, event consequences, permanent-by-default
+    stored lifetimes, and derived or triggered selector/`have` attachments have
+    distinct nodes. Action phrases default their subject to `self`; omitted
+    targets delegate to the verb's normal legal-target rule, while explicit
+    target selectors replace the final range shorthand. Triggered actions are
+    optional unless marked `must`.
+    `game/rule-vocabulary.ts`
     is the canonical dictionary for verbs, properties, phases, aliases, arity,
     timing/damage classes, and observable/contributable capabilities; it also
-    records intentionally unresolved words. The parser remains additive:
-    authoritative matching and catalogue migration have not replaced the
-    legacy trigger/continuous parser.
+    records intentionally unresolved words. Entity AST nodes include exact
+    references, prefix-recognized field queries, descriptors, and
+    singular-reference directional selections. The normalized evaluator and
+    runtime consume this AST for the full catalogue.
+  - `game/rule-evaluator.ts` resolves explicit entity bindings, field queries,
+    Boolean and historical conditions, and observable action/state predicates.
+  - `game/rule-state.ts` stores unit-bound contributions by stable unit ID,
+    evaluates derived rules, cleans up lifetimes, and produces effective life,
+    modifiers, passives, and action values.
+  - `game/rule-runtime.ts` executes normalized event and state consequences,
+    records target/resolved events, preserves fixed action coordinates, and
+    pauses at explicit player-choice boundaries.
   - Signed `life` and `maxlife` phrases compile to status changes rather than actions. `life` adjusts permanent damage while clamping healing at the current maximum; `maxlife` adjusts the unit's maximum from its catalogue base health, so current health can never exceed it.
 - `game/engine.ts`
   - `GameState`, units, effects, bashes, bombs, phases, and pending resolutions.
@@ -78,6 +90,12 @@ The rules layer should remain deterministic and UI-independent. A rules change s
   - HTTP parsing, static MIME types, nickname cleaning, and JSON responses.
 
 The client sends selections and actions. The server validates them against current state and broadcasts a `ServerMatchState` snapshot.
+
+The match service accepts revision-bound semantic preview requests. Preview and
+confirmation both call the authoritative game transition; preview mode clones
+mutable match state and suppresses persistence, broadcast, revision increments,
+and permanent diagnostics. Superseded or stale previews are discarded by the
+client.
 
 ### Client support modules
 
@@ -131,11 +149,16 @@ The client sends selections and actions. The server validates them against curre
 
 ## Authoritative state flow
 
-Passive-description presentation is explicit: catalogue text wrapped in `~...~` is projected as purple magic-modifier text. The marker is decorative only, is removed by HTML and SVG renderers, and does not affect authoritative modifier resolution.
+Card presentation has no parallel passive-description catalogue. Parsed active
+actions and normalized rules feed one client-side formatter: hover cards render
+readable sentences, while side cards and board hexes render compact icon/value
+phrases. The compact formatter may wrap magic-modifier values in `~...~`; that
+marker is decorative only, is removed by HTML and SVG renderers, and does not
+affect authoritative modifier resolution.
 
 Pending-resolution snapshots identify their source by owner-scoped unit ID when it is still deployed. The client uses that authoritative identity for source highlighting; resolution legality and passive damage immunity remain engine responsibilities.
 
-Input-bearing triggered actions reuse the ordinary visual projection pipeline. `resolve-move` and `resolve-pull` stage the moved troop and any prospective bash, with Pull recording its authoritative origin for opponent confirmation playback. Instant/death ranged and instant Magic choices preview from the pending resolution's snapshotted origin and damage, then switch to their existing one-shot authoritative resolution presentation on confirmation. Triggered Stun previews the target animation while staged and retains the normal effect-backed playback after confirmation.
+Input-bearing triggered actions reuse the ordinary visual projection pipeline. Normalized phase consequences are adapted into the same authoritative dashboard stack and pending-resolution queue, so their migration does not create a second choice protocol. `resolve-move` and `resolve-pull` stage the moved troop and any prospective bash, with Pull recording its authoritative origin for opponent confirmation playback. Instant/death ranged and instant Magic choices preview from the pending resolution's snapshotted origin and damage, then switch to their existing one-shot authoritative resolution presentation on confirmation. Triggered Stun previews the target animation while staged and retains the normal effect-backed playback after confirmation.
 
 Instant-damage animation is reconstructed client-side from two authoritative snapshots: the previous pending resolution supplies origin and damage, while the new revision event supplies the selected target. This presentation does not add a persistent engine effect or delay authoritative resolution.
 
@@ -215,6 +238,15 @@ The main phases are documented in `README.md`:
 5. `end`
 
 Effects, bashes, bombs, triggers, and optional choices can survive across phases. The dashboard and LIFO resolution stack preserve trigger provenance and ordering.
+
+Normalized triggers use post-event timing. The runtime captures matching rules
+when an event occurs, applies the authoritative mutation, performs its
+`removed-after` cleanup, and then executes the captured consequences before the
+engine advances to combat, End, or the next Start phase. The later
+`A-resolved` record remains a distinct notification and follows the same
+capture-then-fire rule. Runtime rule sources retain a last-known unit snapshot,
+allowing death triggers to fire after their source has been removed from the
+board.
 
 ## Persistence
 

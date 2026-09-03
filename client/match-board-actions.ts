@@ -55,6 +55,14 @@ function clearServerSelection(): void {
 function sendServerSelection(troopId: string | undefined, target?: { type: GameActionType; coordinate: Coordinate }): void {
   if (!state.serverMatch) return;
   context.send({ type: 'select', matchId: state.serverMatch.id, troopId, target });
+  const authoritative = state.serverAuthoritativeMatch ?? state.serverMatch;
+  const pending = state.serverPendingAction;
+  const complete = pending && (pending.type !== 'upgrade' || Boolean(pending.ability))
+    && (pending.type !== 'push' && pending.type !== 'pull' && pending.type !== 'resolve-pull' || Boolean(pending.destination));
+  if (target && pending && complete && authoritative) {
+    const requestId = ++state.serverPreviewRequestId;
+    context.send({ type: 'preview', requestId, matchId: authoritative.id, revision: authoritative.revision, action: pending });
+  }
 }
 
 function sendServerAction(action: { type: GameActionType; troopId?: string; coordinate?: Coordinate; destination?: Coordinate; targetUnitId?: string; targetBomb?: boolean; ability?: UpgradableAbility }): void {

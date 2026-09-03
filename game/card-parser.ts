@@ -1,4 +1,5 @@
-import type { ActionQualifier, CardAction, ContinuousEffect, PassiveKind, RegionType, TriggerCondition, TriggerDefinition, TroopRole, TroopSeed } from './cards.js';
+import type { ActionQualifier, CardAction, PassiveKind, RegionType, TroopRole, TroopSeed } from './cards.js';
+import { parseRule } from './rule-parser.js';
 
 export interface CardSource {
   id: string;
@@ -8,9 +9,10 @@ export interface CardSource {
   deploymentRegions: string;
   actions?: string;
   passives?: string;
-  triggers?: string;
-  continuous?: string;
-  continuousEffects?: string;
+  /** Canonical normalized rules, parsed exactly once with the catalogue. */
+  rules?: readonly string[];
+  /** Stable identities used by stack rows and persisted rule contributions. */
+  ruleIds?: readonly string[];
 }
 
 const number = (token: string, context: string): number => {
@@ -30,6 +32,34 @@ function actionName(token: string): { kind: CardAction['kind']; type?: CardActio
 }
 
 export function parseAction(text: string, context = 'action'): CardAction {
+  const functionMatch = text.trim().match(/^((?:[PFT]\.)*)([a-z][a-z-]*)\(([^)]*)\)$/);
+  if (functionMatch) {
+    const qualifierPrefix = functionMatch[1];
+    const name = functionMatch[2];
+    const parameters = functionMatch[3].trim()
+      ? functionMatch[3].split(',').map(token => number(token.trim(), context))
+      : [];
+    const type: ActionQualifier[] = qualifierPrefix.split('.').filter(Boolean).map(part =>
+      part === 'P' ? 'pierce' : part === 'F' ? 'instant' : 'tireless');
+    if (name === 'move' || name === 'fly') {
+      if (parameters.length !== 1) throw new Error(`${context}: ${name} needs exactly one parameter`);
+      return { kind: name, range: parameters[0], ...(type.length ? { type } : {}) };
+    }
+    if (name === 'revive') {
+      if (parameters.length) throw new Error(`${context}: revive takes no parameters`);
+      return { kind: 'revive', range: 0, ...(type.length ? { type } : {}) };
+    }
+    if (name === 'upgrade') {
+      if (parameters.length !== 3) throw new Error(`${context}: upgrade needs exactly three parameters`);
+      return { kind: 'upgrade', amount: [parameters[0], parameters[1]], range: parameters[2], ...(type.length ? { type } : {}) };
+    }
+    const parsed = actionName(name);
+    if (parameters.length !== 2) throw new Error(`${context}: ${name} needs exactly two parameters`);
+    if (parsed.kind === 'mending' && parameters[1] === 0) return parameters[0] < 0
+      ? { kind: 'damage', amount: Math.abs(parameters[0]), range: 0, type: ['permanent', ...type] }
+      : { kind: 'heal', amount: parameters[0], range: 0, ...(type.length ? { type } : {}) };
+    return { kind: parsed.kind, amount: parameters[0], range: parameters[1], ...((parsed.type?.length || type.length) ? { type: [...(parsed.type ?? []), ...type] } : {}) };
+  }
   const tokens = text.trim().split(/\s+/);
   if (tokens[0] === 'move' || tokens[0] === 'fly') return { kind: tokens[0], range: number(tokens[1], context) };
   if (tokens[0] === 'revive') return { kind: 'revive', range: 0 };
@@ -51,164 +81,31 @@ export function parseAction(text: string, context = 'action'): CardAction {
 }
 
 export function parseActions(text: string | undefined, context = 'actions', implicitMove = true): readonly CardAction[] {
-  const explicit = (text ?? '').split(',').map(value => value.trim()).filter(Boolean).map(value => parseAction(value, context));
+  const phrases: string[] = [];
+  let depth = 0;
+  let start = 0;
+  const source = text ?? '';
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === '(') depth += 1;
+    else if (source[index] === ')') depth -= 1;
+    else if (source[index] === ',' && depth === 0) {
+      phrases.push(source.slice(start, index));
+      start = index + 1;
+    }
+    if (depth < 0) throw new Error(`${context}: unmatched closing parenthesis`);
+  }
+  if (depth !== 0) throw new Error(`${context}: unmatched opening parenthesis`);
+  phrases.push(source.slice(start));
+  const explicit = phrases.map(value => value.trim()).filter(Boolean).map(value => parseAction(value, context));
   if (implicitMove && !explicit.some(action => action.kind === 'move' || action.kind === 'fly')) explicit.unshift({ kind: 'move', range: 1 });
   return explicit.filter(action => action.kind !== 'move' || action.range > 0);
-}
-
-export function parseCondition(text: string): TriggerCondition {
-  const words = text.trim().split(/\s+/);
-  const verb = words.find(word => ['start', 'end', 'deploy', 'bash', 'is-bash-by', 'fire', 'shield', 'stun', 'hit', 'wound', 'wounds', 'move', 'die', 'dies'].includes(word));
-  switch (verb) {
-    case 'start': case 'end': return { kind: 'phase', type: [verb], subject: 'self' };
-    case 'deploy': return { signal: 'deploy', subject: 'self' };
-    case 'bash': return { signal: 'bashAttack', subject: 'self' };
-    case 'is-bash-by': return { signal: 'bashDefense', subject: 'self' };
-    case 'fire': return { signal: 'magicUsed', subject: 'self' };
-    case 'shield': return { kind: 'defense', subject: 'self' };
-    case 'stun': return { signal: 'stunUsed', subject: 'self' };
-    case 'hit': return { signal: 'attackResolved', subject: 'self' };
-    case 'wound': case 'wounds': return { signal: 'successfulAttack', subject: 'self' };
-    case 'move': return { signal: 'movementUsed', subject: 'self' };
-    case 'die': case 'dies': return { signal: 'death', subject: 'self' };
-    default: throw new Error(`unknown trigger condition "${text}"`);
-  }
-}
-
-export function parseTriggers(text: string | undefined, cardId: string): readonly TriggerDefinition[] | undefined {
-  if (!text) return undefined;
-  const result: TriggerDefinition[] = [];
-  for (const [ruleIndex, rule] of text.split(',').map(value => value.trim()).filter(Boolean).entries()) {
-    const separator = rule.indexOf(':');
-    if (separator < 0) throw new Error(`${cardId}: trigger "${rule}" needs ':'`);
-    const condition = parseCondition(rule.slice(0, separator));
-    const effects = rule.slice(separator + 1).split('&').map(value => value.trim()).filter(Boolean);
-    const knownIds: Record<string, readonly string[]> = {
-      'squirrel-king': ['kindle'], 'wandering-monarch': ['end-stride'], 'stag-guardian': ['renewal'],
-      'raven-prince': ['dusk-stun'], 'boar-warlord': ['start-stride', 'battle-hardened'],
-      'tortoise-emperor': ['imperial-shelter'], 'thunder-toad': ['thunder-charge'],
-      'bellwing-crane': ['bellwing-stun'], 'frosthorn-yak': ['frosthorn-call'],
-      'duelist-scorpion': ['duelist-deploy'], 'needle-peacock': ['needle-sting'],
-      'iron-bell-golem': ['iron-bell-deploy'], 'prism-moth': ['prismatic-bash'],
-      'warding-bat': ['dawn-fire'], 'arcane-viper': ['arcane-resonance'],
-      'ironhide-boar-pup': ['gore-hardened'], 'deep-ocean-octopus': ['tentacle-grip'],
-      'spellshield-beetle': ['carapace'], 'battle-magpie': ['magpie-strike'],
-      'reed-archer': ['sharpen'], 'marching-giant': ['attrition'],
-      'phoenix-moth': ['death-burst'], 'pine-processionary': ['revive'],
-      'sahel-porcupine': ['momentum'], 'temple-last-bell': ['last-bell']
-    };
-    for (const [effectIndex, effect] of effects.entries()) {
-      const baseId = knownIds[cardId]?.[ruleIndex] ?? `rule-${ruleIndex + 1}`;
-      result.push({ id: effects.length === 1 ? baseId : `${baseId}-${effectIndex + 1}`, condition, action: parseAction(effect, `${cardId} trigger`) });
-    }
-  }
-  return result;
-}
-
-const signed = (value: number): string => `${value >= 0 ? '+' : ''}${value}`;
-
-function compactAction(action: CardAction): string {
-  const values = Array.isArray(action.amount) ? action.amount : [action.amount ?? 0];
-  const left = values[0] ?? 0; const right = values[1] ?? 0;
-  const qualifier = `${action.type?.includes('pierce') ? 'P' : ''}${action.type?.includes('instant') ? 'F' : ''}${action.type?.includes('tireless') ? 'T' : ''}`;
-  const tireless = action.type?.includes('tireless') ? 'T' : '';
-  if (action.kind === 'move') return `${tireless}🥾${action.range}`;
-  if (action.kind === 'fly') return `${tireless}🪽${action.range}`;
-  if (action.kind === 'ranged') return `${left}${qualifier}🏹${action.range}`;
-  if (action.kind === 'fire') return `${left}${qualifier}🔥${action.range}`;
-  if (action.kind === 'cannon') return `${left}${tireless}🧨${action.range}`;
-  if (action.kind === 'gore') return `${left}${tireless}🐏${action.range}`;
-  if (action.kind === 'bomb') return `${left}${tireless}💣${action.range}`;
-  if (action.kind === 'push') return `${left}${tireless}🫸${action.range}`;
-  if (action.kind === 'pull') return `${left}${tireless}🫷${action.range}`;
-  if (action.kind === 'stun') return `${left}${tireless}🚫${action.range}`;
-  if (action.kind === 'mending' || action.kind === 'heal') return `${signed(left)}${tireless}❤️${action.range || ''}`;
-  if (action.kind === 'damage') return `${signed(-Math.abs(left))}❤️${action.range || ''}`;
-  if (action.kind === 'life') return `${signed(left)}❤️`;
-  if (action.kind === 'maxlife') return `${signed(left)} max❤️`;
-  if (action.kind === 'defense') {
-    const shield = `${signed(left)}${tireless}🛡️${action.range || ''}`;
-    const result = action.type?.includes('magic') ? `~${shield}~` : shield;
-    return `${result}${action.type?.includes('adjacent') ? ' [[friend:all adj]]' : ''}`;
-  }
-  if (action.kind === 'modifier') return `${[left ? signed(left) : '', right ? `~${signed(right)}~` : ''].filter(Boolean).join(' ') || '+0'}${action.type?.includes('adjacent') ? ' [[friend:all adj]]' : ''}`;
-  if (action.kind === 'upgrade' && action.type?.includes('attack')) return `${signed(left)}🏹${signed(right)}`;
-  if (action.kind === 'upgrade') return `${left}🔮${right} ${action.range}`;
-  if (action.kind === 'revive') return '👼';
-  return action.kind;
-}
-
-function compactCondition(text: string): string {
-  const words: Record<string, string> = {
-    start: 'Start', end: 'End', deploy: 'Deploy', bash: '⚔️', 'is-bash-by': 'is ⚔️',
-    fire: '🔥', shield: '🛡️', stun: '🚫', hit: 'hits', wound: 'wounds', wounds: 'wounds',
-    move: '🥾', die: '💀', dies: '💀', self: 'self', 'any-friend': '[[friend:any]]',
-    'any-enemy': '[[enemy:any]]', 'all-friend': '[[friend:all]]', 'all-enemy': '[[enemy:all]]',
-    'adjacent-friend': '[[friend:adj]]', 'adjacent-enemy': '[[enemy:adj]]',
-    'hero-friend': '[[friend:hero]]', 'hero-enemy': '[[enemy:hero]]',
-    'all-adj-friend': '[[friend:all adj]]', 'all-adj-enemy': '[[enemy:all adj]]',
-    'any-hex-friend': '[[friend-dark:⬢]]', 'any-hex-enemy': '[[enemy-dark:⬢]]',
-    'enemy-hex': 'enemy hex', wounded: 'Wounded', shielded: 'is 🛡️', deployed: 'Deployed', hero: 'hero', subject: ''
-  };
-  return text.trim().split(/\s+/).map(word => words[word] ?? word.replaceAll('-', ' ')).filter(Boolean).join(' ');
-}
-
-export function triggerDescription(text: string, cardId = 'trigger'): string {
-  return text.split(',').map(rule => {
-    const separator = rule.indexOf(':');
-    if (separator < 0) throw new Error(`${cardId}: trigger "${rule.trim()}" needs ':'`);
-    const condition = compactCondition(rule.slice(0, separator));
-    const actions = rule.slice(separator + 1).split('&').map(value => compactAction(parseAction(value.trim(), `${cardId} trigger`)));
-    return `${condition}: ${actions.join(' & ')}`;
-  }).join('\n');
-}
-
-export function continuousDescription(text: string, cardId = 'continuous'): string {
-  const delimiter = text.includes('::') ? '::' : ':';
-  const separator = text.indexOf(delimiter);
-  if (separator < 0) throw new Error(`${cardId}: continuous rule needs '::'`);
-  const rawCondition = text.slice(0, separator).trim();
-  const condition = compactCondition(rawCondition);
-  const effectText = text.slice(separator + delimiter.length).trim();
-  let effect: string;
-  const abilityBonus = effectText.match(/^([+-]\d+)\s+(bow|fire)\s+([+-]\d+)/);
-  const moveBonus = effectText.match(/^move\s+([+-]\d+)/);
-  if (/^[+-]?\d+$/.test(effectText)) effect = signed(Number(effectText));
-  else if (abilityBonus) effect = `${abilityBonus[1]}${abilityBonus[2] === 'bow' ? '🏹' : '🔥'}${abilityBonus[3]}`;
-  else if (moveBonus) effect = `🥾${moveBonus[1]}`;
-  else effect = compactAction(parseAction(effectText, `${cardId} continuous`));
-  const audience = effectText.includes('all-friend') ? ' [[friend:all]]' : effectText.includes('all-enemy') ? ' [[enemy:all]]' : '';
-  return rawCondition === 'deployed' ? `${effect}${audience}` : `${condition}: ${effect}${audience}`;
-}
-
-function parseContinuous(text: string | undefined, cardId: string): readonly ContinuousEffect[] | undefined {
-  if (!text) return undefined;
-  const delimiter = text.includes('::') ? '::' : ':';
-  const [conditionText, effectText] = text.split(delimiter).map(value => value.trim());
-  if (!effectText) throw new Error(`${cardId}: continuous rule needs '::'`);
-  const label = cardId.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
-  if (/\b(bow|fire)\b/.test(effectText) || effectText.startsWith('move ')) {
-    const match = effectText.match(/^(?:([+-]\d+)\s+)?(bow|fire|move)(?:\s+([+-]\d+))?/);
-    if (!match) throw new Error(`${cardId}: invalid continuous ability "${effectText}"`);
-    return [{ condition: 'deployed', kind: 'ability-bonus', ability: match[2] === 'bow' ? 'attack' : match[2] === 'fire' ? 'magic' : 'move', left: number(match[1] ?? '0', cardId), right: number(match[3] ?? '0', cardId), label }];
-  }
-  const value = number(effectText.match(/[+-]?\d+/)?.[0] ?? '', cardId);
-  const condition: ContinuousEffect['condition'] = conditionText === 'wounded' ? 'injured'
-    : conditionText === 'bash hero' ? 'bash-attacker-vs-hero'
-    : conditionText === 'bash' ? 'bash-attacker'
-    : conditionText.includes('bash') ? 'in-bash'
-    : conditionText === 'deployed' ? 'deployed'
-    : conditionText.includes('shield') ? 'shielded'
-    : 'deployed';
-  return [{ condition, kind: 'combat-modifier', value, label, ...(effectText.includes('subject') ? { scope: 'allies' as const } : {}) }];
 }
 
 export function parseCard(source: CardSource): TroopSeed {
   const title = source.name ?? source.id.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
   const regions = source.deploymentRegions.split(/\s+/).filter(region => region !== 'enemy') as RegionType[];
-  const triggers = parseTriggers(source.triggers, source.id);
-  const continuousEffects = parseContinuous(source.continuous ?? source.continuousEffects, source.id);
   const parsedActions = parseActions(source.actions, `${source.id} actions`, (source.role ?? 'troop') !== 'temple');
+  const rules = source.rules?.map((rule, index) => parseRule(rule, `${source.id} rule ${index + 1}`));
   const selfDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && !action.type?.includes('magic'));
   const selfMagicDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && action.type?.includes('magic'));
   const actions = parsedActions.filter(action => action !== selfDefense && action !== selfMagicDefense);
@@ -217,12 +114,8 @@ export function parseCard(source: CardSource): TroopSeed {
     deploymentRegions: regions, actions,
     ...(source.deploymentRegions.split(/\s+/).includes('enemy') ? { deploymentRule: 'enemy-region' as const } : {}),
     ...(source.passives ? { passives: source.passives.split(/\s+/) as PassiveKind[] } : {}),
-    ...(source.triggers || source.continuous || source.continuousEffects
-      ? { passiveDescription: [source.triggers ? triggerDescription(source.triggers, source.id) : '', source.continuous || source.continuousEffects ? continuousDescription(source.continuous ?? source.continuousEffects ?? '', source.id) : ''].filter(Boolean).join('\n') }
-      : {}),
     ...(selfDefense ? { selfDefense: Number(selfDefense.amount ?? 0) } : {}),
     ...(selfMagicDefense ? { selfMagicDefense: Number(selfMagicDefense.amount ?? 0) } : {}),
-    ...(triggers ? { triggers } : {}),
-    ...(continuousEffects ? { continuousEffects } : {})
+    ...(rules ? { rules, ruleSources: [...(source.rules ?? [])], ruleIds: [...(source.ruleIds ?? [])] } : {})
   };
 }

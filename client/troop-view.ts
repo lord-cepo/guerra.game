@@ -2,18 +2,18 @@ import {
   troopSeeds,
   type AttackAction,
   type ActionQualifier,
-  type ContinuousEffect,
-  type LegacyActionView,
+  type ActionView,
   type PassiveKind,
   type RegionType,
   type TroopAction,
   type TroopRole,
-  type TriggerDefinition,
   type UpgradableAbility
 } from '../game/cards.js';
 import { PLAYABLE_COORDINATES, regionAt, type Coordinate } from '../game/board.js';
 import type { Player } from '../game/types.js';
+import type { ParsedRule } from '../game/rule-parser.js';
 import type { GameActionType, ServerMatchState, ServerUnitState } from './protocol.js';
+import { compactRuleDescriptions, detailedRuleDescriptions } from './rule-text-presentation.js';
 
 export const pushIcon = '\u{1FAF8}';
 export const pullIcon = '\u{1FAF7}';
@@ -32,10 +32,9 @@ export interface Troop {
   role: TroopRole;
   actions: readonly TroopAction[];
   passives?: readonly PassiveKind[];
-  triggers?: readonly TriggerDefinition[];
   deploymentRegions: readonly RegionType[];
-  passiveDescription?: string;
-  ruleDescription?: string;
+  rules?: readonly ParsedRule[];
+  ruleSources?: readonly string[];
   deploymentRule?: 'enemy-region';
   selfDefense?: number;
   selfMagicDefense?: number;
@@ -45,7 +44,6 @@ export interface Troop {
   rangedRangeBonus?: number;
   magicDamageBonus?: number;
   magicRangeBonus?: number;
-  continuousEffects?: readonly ContinuousEffect[];
   staticAuras?: Array<{ ability: 'move' | 'attack' | 'magic'; left: number; right: number; sourceCardId: string }>;
   upgrades?: Array<{ ability?: UpgradableAbility; left?: number; right?: number; sourceUnitId?: string }>;
   coordinate?: Coordinate;
@@ -60,6 +58,8 @@ export function createTroopView(cardId: string, owner: Player, unit?: ServerUnit
   if (!seed) return undefined;
   return {
     ...seed,
+    ...(unit?.effectiveActions ? { actions: unit.effectiveActions } : {}),
+    ...(unit?.effectivePassives ? { passives: unit.effectivePassives } : {}),
     cardId: seed.id,
     id: unit?.id ?? `${owner}:${cardId}`,
     owner,
@@ -100,6 +100,10 @@ const passivePresentations: Record<PassiveKind, PassivePresentation> = {
   steady: {
     compact: 'Steady',
     rule: 'Steady: its opponent has 0 combat modifier while this unit is in a bash.'
+  },
+  fast: {
+    compact: 'Fast',
+    rule: 'Fast: a bash involving this unit resolves immediately after Bash-announcement triggers.'
   }
 };
 
@@ -214,7 +218,7 @@ function cardActionType(action: TroopAction): UpgradableAbility {
   return action.kind as UpgradableAbility;
 }
 
-export function actionOfType(troop: Troop, type: UpgradableAbility): LegacyActionView | undefined {
+export function actionOfType(troop: Troop, type: UpgradableAbility): ActionView | undefined {
   const action = troop.actions.find(candidate => cardActionType(candidate) === type);
   if (!action) return undefined;
   const values = Array.isArray(action.amount) ? action.amount : [action.amount ?? 0];
@@ -222,17 +226,17 @@ export function actionOfType(troop: Troop, type: UpgradableAbility): LegacyActio
   return { type, range: action.range, amount: first, maxDistance: type === 'move' || type === 'fly' ? action.range : first, damage: first, block: first, left: first, right: second, usesHealth: type === 'attack' && action.amount === undefined, qualifiers: action.type };
 }
 
-function attackPrefix(action: LegacyActionView): string {
+function attackPrefix(action: ActionView): string {
   const qualifiers: readonly ActionQualifier[] = action.qualifiers ?? [];
   return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}${qualifiers.includes('tireless') ? 'T' : ''}`;
 }
 
-function magicPrefix(action: LegacyActionView): string {
+function magicPrefix(action: ActionView): string {
   const qualifiers: readonly ActionQualifier[] = action.qualifiers ?? [];
   return `${qualifiers.includes('pierce') ? 'P' : ''}${qualifiers.includes('instant') ? 'F' : ''}${qualifiers.includes('tireless') ? 'T' : ''}`;
 }
 
-function tirelessPrefix(action: LegacyActionView): string {
+function tirelessPrefix(action: ActionView): string {
   return action.qualifiers?.includes('tireless') ? 'T' : '';
 }
 
@@ -293,7 +297,7 @@ export function serverCardDetails(troop: Troop): string[] {
     upgrade ? detail('upgrade', `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`) : '',
     troop.control ? `Control ${troop.control}` : '',
     ...passiveCompactDescriptions(troop),
-    ...(troop.passiveDescription?.split('\n') ?? [])
+    ...compactRuleDescriptions(troop.rules)
   ].filter(Boolean))];
 }
 
@@ -345,11 +349,10 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
   if (upgrade) abilities.push({ text: `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`, action: 'upgrade' });
   if (troop.control) abilities.push({ text: `Control ${troop.control}` });
 
-  const passiveLines = troop.passiveDescription?.split('\n').filter(Boolean) ?? [];
   const contentLines: BoardDescriptionLine[] = [
     ...abilities,
     ...passiveCompactDescriptions(troop).map(text => ({ text })),
-    ...passiveLines.map(text => ({ text, magicModifier: /~[^~]+~/u.test(text) }))
+    ...compactRuleDescriptions(troop.rules).map(text => ({ text, magicModifier: /~[^~]+~/u.test(text) }))
   ];
   // A board hex always owns health plus exactly three information rows.
   // Preserve the final row's action metadata when marking overflow so
@@ -442,7 +445,7 @@ export function cardRuleDetails(troop: Troop): string[] {
   }
   if (troop.control) rules.push(`Control ${troop.control}: this unit contributes ${troop.control} additional control to its current region.`);
   rules.push(...passiveRuleDescriptions(troop));
-  if (troop.ruleDescription) rules.push(troop.ruleDescription);
+  rules.push(...detailedRuleDescriptions(troop.rules));
   return rules;
 }
 
@@ -481,7 +484,7 @@ export function fullEffectLines(troop: Troop): string[] {
   if (upgrade) effects.push(`${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`);
   if (troop.control) effects.push(`Control ${troop.control}`);
   effects.push(...passiveCompactDescriptions(troop));
-  if (troop.passiveDescription) effects.push(...troop.passiveDescription.split('\n').filter(Boolean));
+  effects.push(...compactRuleDescriptions(troop.rules));
   return [...new Set(effects)];
 }
 

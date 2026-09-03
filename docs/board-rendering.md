@@ -92,7 +92,7 @@ When changing order, inspect both empty and occupied targets, bashes, and action
 - optional action-description highlight;
 - `.board-troop-description` health and ability text.
 
-Every occupied board hex renders actual/total health and the signed combat modifier in its upper stat area, plus exactly three ability/effect rows in the lower information area. A troop with both physical and magic modifiers displays them consecutively as `+M+N`; a lone magic modifier displays as `+N`. Missing information rows remain empty to keep spacing stable. If more information exists, the third information row keeps its normal text and ends with `...`; full details remain available outside the compact hex summary.
+Every occupied board hex renders actual/total health and the signed combat modifier in its upper stat area, plus exactly three ability/effect rows in the lower information area. Active actions and normalized rules share the card-text presentation pipeline; rule rows deliberately retain only their compact trigger/condition plus icon/value form. A troop with both physical and magic modifiers displays them consecutively as `+M+N`; a lone magic modifier displays as `+N`. Missing information rows remain empty to keep spacing stable. If more information exists, the third information row keeps its normal text and ends with `...`; full details remain available in the generated hover explanation.
 
 Compact card and hex summaries show `Move 0` only for immobile non-Fly troops. Fly already communicates the alternate movement capability, and temples are inherently immobile, so neither repeats `Move 0`.
 
@@ -124,6 +124,14 @@ Inactive/last-acting troop pictures use a warm grayscale/sepia parchment filter 
 - `ArrowLeft` replays the latest completed authoritative turn transition observed by the client. Replay uses cached before/after snapshots, never sends an action or rewinds authoritative state, works for either player's action, and restarts the relevant one-shot or repeating presentation from its beginning without clearing the current selection. If that turn consumed earlier pending ranged, Fire Magic, or Cannon effects, replay reconstructs every consumed source-to-target projectile from the pre-turn snapshot and delays their slash/health resolution until those flights finish.
 
 ## Preview architecture
+
+After a complete target selection, the client requests a revision-bound
+semantic preview and renders the projected server snapshot. The authoritative
+snapshot remains the source for selection and action controls, so a projected
+turn change cannot clear the staged action. A newer authoritative revision
+always replaces the projection; late preview responses for an older request or
+revision are ignored. Preview renders suppress confirmed-action playback and
+state-advanced animations.
 
 Transient browser state includes:
 

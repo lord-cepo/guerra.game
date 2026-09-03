@@ -6,7 +6,7 @@ const unit = (id, troopId, owner, coordinate, health = 4) => ({
   id, troopId, owner, coordinate, permanentDamage: 0, currentHealth: health,
   combat: { health, modifier: 0, magicModifier: 0, modifiers: [], total: health },
 });
-const match = overrides => ({ id: 'resolution-test', revision: 1, units: [], effects: [], bashes: [], events: [], triggerEvents: [], ...overrides });
+const match = overrides => ({ id: 'resolution-test', revision: 1, units: [], effects: [], bashes: [], events: [], presentationEvents: [], ...overrides });
 const options = overrides => ({
   replayingLastTurn: false, reducedMotion: false, shieldFrameCount: 7,
   baseHealthForTroop: () => 4, passivesForTroop: () => [], confirmedProjectiles: () => [], ...overrides,
@@ -58,8 +58,9 @@ test('a removed bash animates only when a new matching bashResolved event exists
   const bash = { attackerId: attacker.id, defenderId: defender.id, target: '0,0' };
   const previous = match({ units: [attacker, defender], bashes: [bash] });
   assert.deepEqual(resolvedBashAnimations(previous, match({ revision: 2, units: [attacker, defender] }), options()), []);
-  const resolved = match({ revision: 2, units: [attacker], triggerEvents: [{
-    trigger: 'bashResolved', player: 1, hex: '0,0', troopIds: ['ram', 'yak'], attackerId: attacker.id, defenderId: defender.id,
+  const resolved = match({ revision: 2, units: [attacker], presentationEvents: [{
+    id: 1, name: 'bash', stage: 'resolved', controller: 1, turn: 1, success: true,
+    parameters: [], qualifiers: [], destination: '0,0', subject: { kind: 'unit', unitId: attacker.id }, object: { kind: 'unit', unitId: defender.id },
   }] });
   const [animation] = resolvedBashAnimations(previous, resolved, options());
   assert.equal(animation.winnerId, attacker.id);
@@ -72,8 +73,9 @@ test('a resolved bash that still has two survivors is presented as continuing', 
   const bash = { attackerId: attacker.id, defenderId: defender.id, target: '0,0' };
   const previous = match({ units: [attacker, defender], bashes: [bash] });
   const nextDefender = { ...defender, currentHealth: 2, permanentDamage: 1, combat: { ...defender.combat, health: 2, total: 2 } };
-  const resolved = match({ revision: 2, units: [attacker, nextDefender], bashes: [bash], triggerEvents: [{
-    trigger: 'bashResolved', player: 1, hex: '0,0', troopIds: [attacker.id, defender.id], attackerId: attacker.id, defenderId: defender.id,
+  const resolved = match({ revision: 2, units: [attacker, nextDefender], bashes: [bash], presentationEvents: [{
+    id: 1, name: 'bash', stage: 'resolved', controller: 1, turn: 1, success: true,
+    parameters: [], qualifiers: [], destination: '0,0', subject: { kind: 'unit', unitId: attacker.id }, object: { kind: 'unit', unitId: defender.id },
   }] });
   const [animation] = resolvedBashAnimations(previous, resolved, options());
   assert.equal(animation.continues, true);

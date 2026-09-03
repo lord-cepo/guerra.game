@@ -47,7 +47,7 @@ const { assetsReady, withBusyCursor, readApiJson } = createBrowserRuntime();
 const matchConnection = createMatchConnection({
   nickname: () => state.currentNickname,
   activeMatchId: () => state.activeMatchId,
-  currentMatch: () => state.serverMatch,
+  currentMatch: () => state.serverAuthoritativeMatch ?? state.serverMatch,
   onStatus: setConnectionStatus,
   onError: message => {
     state.serverActionError = message;
@@ -55,8 +55,17 @@ const matchConnection = createMatchConnection({
     if (state.serverMatch && state.localMatchPlayer && !mainPanel.hidden) renderServerActionBar(state.serverMatch, state.localMatchPlayer);
   },
   onState: match => {
+    if (state.serverAuthoritativeMatch && state.serverAuthoritativeMatch.revision !== match.revision) state.serverPreviewRequestId += 1;
+    state.serverMatch = state.serverAuthoritativeMatch;
+    state.serverAuthoritativeMatch = match;
     if (!applyLocalPlayerView(match)) return;
     if (!mainPanel.hidden) renderServerMatchState(match);
+  },
+  onPreview: (requestId, preview) => {
+    if (requestId !== state.serverPreviewRequestId || !state.serverAuthoritativeMatch || preview.baseRevision !== state.serverAuthoritativeMatch.revision || mainPanel.hidden) return;
+    state.serverRenderingPreview = true;
+    try { renderServerMatchState(preview.match); }
+    finally { state.serverRenderingPreview = false; }
   },
 });
 

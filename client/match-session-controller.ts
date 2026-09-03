@@ -1,7 +1,7 @@
 import type { Player } from '../game/types.js';
 import type { HexGridState } from './hex-grid-state.js';
 import type { ServerMatchState, ServerUnitState } from './protocol.js';
-import { catalogueById, createTroopView, type Troop } from './troop-view.js';
+import { createTroopView, type Troop } from './troop-view.js';
 
 interface MatchSessionContext {
   state: HexGridState;
@@ -29,6 +29,7 @@ export function createMatchSessionController(context: MatchSessionContext) {
 function openMatchEntry(matchId: string): void {
   state.activeMatchId = matchId;
   state.serverMatch = undefined;
+  state.serverAuthoritativeMatch = undefined;
   state.playedDeploymentAnimations.clear();
   state.deploymentAnimationStartTimes.clear();
   state.confirmedDeploymentAnimationRevision = undefined;
@@ -70,6 +71,7 @@ function openMatchEntry(matchId: string): void {
 
 function resumeLiveMatch(match: ServerMatchState): void {
   state.activeMatchId = match.id;
+  state.serverAuthoritativeMatch = match;
   menuScreenPanel.hidden = true;
   matchScreenPanel.hidden = true;
   mainPanel.hidden = false;
@@ -144,14 +146,9 @@ function serverTroop(cardId: string, owner: Player, unit?: ServerUnitState): Tro
   // to total health when persisted damage metadata arrives out of sync.
   if (troop && unit) troop.permanentDamage = Math.max(0, troop.baseHealth - unit.currentHealth);
   if (!troop || !unit || !state.serverMatch) return troop;
+  // Effective actions and passives arrive with the authoritative unit. The
+  // browser no longer reconstructs catalogue auras for confirmed state.
   troop.staticAuras = [];
-  for (const source of state.serverMatch.units.filter(candidate => candidate.owner === owner)) {
-    for (const bonus of catalogueById.get(source.troopId)?.continuousEffects ?? []) {
-      if (bonus.kind === 'ability-bonus' && bonus.condition === 'deployed') {
-        troop.staticAuras.push({ ability: bonus.ability, left: bonus.left ?? 0, right: bonus.right ?? 0, sourceCardId: source.troopId });
-      }
-    }
-  }
   return troop;
 }
   return { openMatchEntry, resumeLiveMatch, localPlayerFor, applyLocalPlayerView, serverTroop };

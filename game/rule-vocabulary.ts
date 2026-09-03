@@ -8,9 +8,14 @@ export interface RuleWordDefinition {
   contributable?: boolean;
   /** Number of entity operands: one is subject-only, two is subject/object. */
   arity?: 1 | 2;
+  /** Number of numeric card parameters accepted by an action/up-action word. */
+  userParameters?: number;
   eventClass?: 'action' | 'result' | 'state-change';
   timing?: 'instant' | 'delayed';
   damageKind?: 'physical' | 'red-magic' | 'black-magic' | 'none';
+  turnAction?: boolean;
+  triggeredExecution?: 'optional' | 'forced';
+  triggeredDeactivates?: boolean;
   aliases?: readonly string[];
   note?: string;
 }
@@ -25,25 +30,25 @@ export const ruleWords = {
   'opponent-start': { kind: 'phase' }, 'opponent-end': { kind: 'phase' },
   'action-resolve': { kind: 'phase' }, 'combat-resolve': { kind: 'phase' },
 
-  bash: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'delayed', damageKind: 'physical' },
-  bow: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'delayed', damageKind: 'physical' },
-  fire: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'delayed', damageKind: 'red-magic', aliases: ['fires'] },
-  cannon: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'delayed', damageKind: 'black-magic' },
-  'gore-attack': { kind: 'verb', arity: 2, eventClass: 'action', timing: 'delayed', damageKind: 'physical' },
-  'bomb-explode': { kind: 'verb', arity: 2, eventClass: 'action', timing: 'delayed', damageKind: 'black-magic' },
-  shield: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  mshield: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  move: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  fly: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  'gore-move': { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  push: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  pull: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  mend: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  stun: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  'bomb-throw': { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none', aliases: ['throw-bomb'] },
-  upgrade: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  defuse: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
-  light: { kind: 'verb', arity: 2, eventClass: 'action', timing: 'instant', damageKind: 'red-magic' },
+  bash: { kind: 'verb', arity: 2, eventClass: 'result', timing: 'delayed', damageKind: 'physical', note: 'A combat consequence, not a turn-consuming or upgradable action.' },
+  bow: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'delayed', damageKind: 'physical' },
+  fire: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'delayed', damageKind: 'red-magic', aliases: ['fires'] },
+  cannon: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'delayed', damageKind: 'black-magic' },
+  'gore-attack': { kind: 'verb', arity: 2, userParameters: 0, eventClass: 'action', timing: 'delayed', damageKind: 'physical' },
+  'bomb-explode': { kind: 'verb', arity: 2, eventClass: 'result', timing: 'delayed', damageKind: 'black-magic', triggeredExecution: 'forced', triggeredDeactivates: false, note: 'Engine consequence caused by Fire, another explosion, or an explicit trigger.' },
+  shield: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  mshield: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  move: { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  fly: { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  'gore-move': { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  push: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  pull: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  mend: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  stun: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  'bomb-throw': { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none', turnAction: true, aliases: ['throw-bomb'], note: 'The proper bomb-icon turn action.' },
+  upgrade: { kind: 'verb', arity: 2, userParameters: 3, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  'bomb-defuse': { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'none', turnAction: true, triggeredExecution: 'forced', triggeredDeactivates: false, aliases: ['defuse'], note: 'A normal action when chosen; a forced, non-deactivating action when caused by a trigger.' },
+  light: { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'red-magic' },
   target: { kind: 'verb', arity: 2, eventClass: 'result' },
   hit: { kind: 'verb', arity: 2, eventClass: 'result', note: 'Damage resolution reached the target, including zero damage.' },
   wound: { kind: 'verb', arity: 2, eventClass: 'result', note: 'The target lost positive life.' },
@@ -57,6 +62,11 @@ export const ruleWords = {
   defeated: { kind: 'property', observable: true, contributable: false },
   undeployed: { kind: 'property', observable: true, contributable: false },
   active: { kind: 'property', observable: true, contributable: false },
+  shielded: { kind: 'property', observable: true, contributable: false },
+  mshielded: { kind: 'property', observable: true, contributable: false },
+  'shielded-by-ally': { kind: 'property', observable: true, contributable: false },
+  'bomb-off': { kind: 'property', observable: true, contributable: false, note: 'An inert bomb; changed only by authoritative bomb actions.' },
+  'bomb-on': { kind: 'property', observable: true, contributable: false, note: 'A lit bomb awaiting explosion; changed only by authoritative bomb actions.' },
   bashing: { kind: 'property', observable: true, contributable: false, arity: 2 },
   'bashed-by': { kind: 'property', observable: true, contributable: false, arity: 2 },
   'is-firing': { kind: 'property', observable: true, contributable: false, arity: 2 },
@@ -64,12 +74,27 @@ export const ruleWords = {
   'is-gore-attacking': { kind: 'property', observable: true, contributable: false, arity: 2 },
   'is-cannoning': { kind: 'property', observable: true, contributable: false, arity: 2 },
   'is-bomb-exploding': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-shielding': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-mshielding': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-moving': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-flying': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-gore-moving': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-pushing': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-pulling': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-mending': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-stunning': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-bomb-throwing': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-upgrading': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-bomb-defusing': { kind: 'property', observable: true, contributable: false, arity: 2 },
+  'is-lighting': { kind: 'property', observable: true, contributable: false, arity: 2 },
   'first-strike': { kind: 'property', observable: true, contributable: true, aliases: ['firststrike'] },
   steady: { kind: 'property', observable: true, contributable: true },
+  fast: { kind: 'property', observable: true, contributable: true, note: 'A Bash resolves immediately when at least one participant has Fast.' },
   titanium: { kind: 'property', observable: true, contributable: true },
   obsidian: { kind: 'property', observable: true, contributable: true },
-  mod: { kind: 'property', observable: false, contributable: true, note: 'Numeric contribution; query effective modifiers through a dedicated predicate.' },
-  up: { kind: 'property', observable: false, contributable: true, note: 'Numeric action upgrade contribution.' },
+  'up-mod': { kind: 'property', observable: false, contributable: true, note: 'Updates physical and magic modifier contributions.' },
+  'up-life': { kind: 'property', observable: false, contributable: true, note: 'Updates actual and starting life.' },
+  'up-action': { kind: 'property', observable: false, contributable: true, note: 'Family template: up-fire, up-bow, etc.; accepts the action numeric arity plus optional final T/P/F.' },
   'action-reachable': { kind: 'property', observable: true, contributable: false },
   'action-reaches': { kind: 'property', observable: true, contributable: false, arity: 2 },
 

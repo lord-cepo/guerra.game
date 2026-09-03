@@ -35,6 +35,21 @@ test('the public match state distinguishes identical cards owned by different pl
   assert.deepEqual(state.units.map(unit => unit.id).sort(), ['1:tiger-queen', '2:tiger-queen']);
 });
 
+test('semantic previews are revision-bound and never mutate, persist, or broadcast authoritative state', () => {
+  const store = new MatchStore(cards);
+  const created = store.createMatch('alice', 'bob', deck, deck, 8);
+  store.setReady(created.id, 'alice');
+  store.setReady(created.id, 'bob');
+  const red = created.players[1];
+  const before = structuredClone(store.getState(created.id));
+  const preview = store.previewAction(created.id, red, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' }, before.revision);
+  assert.equal(preview.baseRevision, before.revision);
+  assert.equal(preview.rulesVersion, 3);
+  assert.equal(preview.match.units.some(unit => unit.id === '1:tiger-queen'), true);
+  assert.deepEqual(store.getState(created.id), before);
+  assert.throws(() => store.previewAction(created.id, red, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' }, before.revision + 1), /stale/);
+});
+
 test('only a match participant can submit an action', () => {
   const store = new MatchStore(cards);
   const created = store.createMatch('alice', 'bob', deck, deck, 8);
@@ -205,14 +220,14 @@ test('diagnostics are bounded and do not duplicate growing public histories', ()
   const match = store.matches.get(created.id);
   match.game.dashboard = [{ id: 1 }];
   match.game.events = [{ revision: 1 }];
-  match.game.triggerEvents = [{ trigger: 'start' }];
+  match.game.normalizedEvents = [{ id: 1, name: 'start', stage: 'target', parameters: [], qualifiers: [], controller: 1, turn: 1, success: true }];
   for (let index = 0; index < 125; index += 1) store.recordDiagnostic(match, { kind: 'selection', index });
   const log = store.diagnosticLog(created.id);
   assert.equal(log.snapshots.length, 100);
   assert.equal(log.snapshots[0].index, 25);
   assert.equal('dashboard' in log.snapshots.at(-1).state, false);
   assert.equal('events' in log.snapshots.at(-1).state, false);
-  assert.equal('triggerEvents' in log.snapshots.at(-1).state, false);
+  assert.equal('normalizedEvents' in log.snapshots.at(-1).state, false);
   assert.equal('legalActions' in log.snapshots.at(-1).state, false);
 });
 
@@ -220,7 +235,7 @@ test('restoring old matches compacts and bounds their diagnostic snapshots', () 
   const store = new MatchStore(cards);
   const snapshots = Array.from({ length: 120 }, (_, index) => ({
     index,
-    state: { revision: index, units: [], dashboard: [{ id: index }], events: [{ revision: index }], triggerEvents: [{ trigger: 'start' }], legalActions: { 1: [] } }
+    state: { revision: index, units: [], dashboard: [{ id: index }], events: [{ revision: index }], normalizedEvents: [{ id: index }], legalActions: { 1: [] } }
   }));
   store.restore([['old-match', {
     id: 'old-match', players: { 1: 'alice', 2: 'bob' }, format: 8,

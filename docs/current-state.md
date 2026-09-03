@@ -5,21 +5,77 @@ This is a concise handoff, not a changelog. Update it when a feature group or ar
 ## Product state
 
 - Browser turn-based strategy game with 8- and 10-card decks.
+- The server rulebook migration is complete. The normalized parser, pure
+  query evaluator, unit-bound stored/effective state, consequence runtime,
+  normalized event records, and revision-bound server previews are implemented.
+  All 37 catalogue rules use normalized ASTs. Engine-owned phase, death,
+  Bash/Bash-resolved, physical Hit/Wound, action, and effect boundaries are
+  dispatched only through the normalized runtime. Pending choices retain the
+  authoritative protocol and stack ordering. Match state is `rulesVersion: 3`;
+  restored older snapshots are upgraded to that version.
 - The normalized rule grammar has a standalone typed parser, canonical word
   registry, and focused tests. It distinguishes event/phase anchors, optional
-  `if` guards, one-time event consequences, stored state with `permanent`,
-  `until`, or `removed-after` lifetimes, and derived `state while condition`
-  rules. Snapshot and historical conditions are separate AST nodes; vocabulary
+  `if` guards, one-time event consequences, stored state with permanent-by-default,
+  `until`, or `removed-after` lifetimes, and derived or triggered
+  `selector have phrase` rules. `have` distributes over the selected cards, lexically rebinds `self`,
+  and forbids `subj`/`obj` inside its attached phrase. Snapshot and historical
+  conditions are separate AST nodes; vocabulary
   metadata validates whether a property is observable and/or contributable.
-  Function parameters use `_` as their canonical wildcard while legacy packed
-  actions remain accepted. The AST is not yet connected to authoritative event
-  matching, history evaluation, or catalogue rules, which continue through the
-  legacy parser. Prefixed `o:`/`p:`/`c:` queries and several explicitly listed
-  ambiguous aliases remain design work rather than guessed parser behavior.
+  Function parameters use `_` as their canonical wildcard. Updates are unified
+  as `up-mod(M,N)`, `up-life(M,N)`,
+  and action-sized `up-ACTION(...[,T/P/F])` state contributions rather than
+  verbs. Bash is a non-upgradable combat consequence; `steady` gives it
+  piercing semantics and the contributable `fast` passive makes it resolve
+  immediately when either participant has Fast. Bombs expose observable
+  `bomb-off`/`bomb-on` states; `bomb-throw` is the proper turn action,
+  `bomb-explode` is an engine consequence, and triggered `bomb-explode` or
+  `bomb-defuse` is forced without deactivating its source. The AST now feeds
+  pure authoritative event matching, history evaluation, stored/effective
+  state, and the first migrated catalogue rules. Canonical multi-field queries
+  use freely ordered prefixed
+  `o:`/`p:`/`r:`/`c:`/`s:`/`t:` fields and ranged directions such as
+  `2-away-from`, `1-parallel-to`, and `1-from`. Positional selectors require a
+  singular `self`/`subj`/`obj` reference; query-first forms such as
+  `o:you adj self` filter their results. Leading `any`/`none`/`all` are Boolean
+  operators rather than selector fields, and event operands never use them.
+  Event-pattern `_` accepts any one concrete operand. Action subjects default
+  to `self`; function-form actions use their verb-specific target rule when the
+  target is omitted, while an explicit selector replaces the final range shorthand
+  (`bow(2,3)` equals `self bow(2) !o:you 3-from self`). Action consequences use
+  their target selector as a choose-one policy by default, pausing for player
+  choice when necessary; `all` freezes matching coordinates and expands them
+  into separate singular action occurrences. Bare consequences are optional;
+  `must` removes the decline choice. Negated owner filters such as `!o:you` are
+  accepted, and phase-trigger consequences that reference unbound `subj` or
+  `obj` are rejected while parsing.
+  Several
+  explicitly listed ambiguous aliases remain design work rather than guessed
+  parser behavior.
+- Explicit `A-resolved` notifications now retain the canonical action plus a
+  resolved AST stage. Action patterns reject partial parameter vectors and
+  illegal Pierce/Tireless qualifiers while still allowing an omitted vector to
+  mean “match any printed values.” Event bindings are phrase-local: action
+  creation stores fixed coordinates, while state resolution stores its concrete
+  mutation or contribution on the selected unit ID.
+  Instant and delayed actions both expose observable, non-contributable
+  `is-A-ing` pending states. The specified post-event order removes
+  `removed-after A` contributions before announcing the separate `A-resolved`
+  notification.
+- Ordinary event triggers now fire after their triggering event has resolved.
+  Matches are captured at occurrence time, the authoritative mutation and
+  `removed-after` cleanup complete, and consequences then execute before later
+  combat/End/Start phase processing. Death triggers use the source's last-known
+  board snapshot after that source has been removed.
 - The catalogue uses a compact textual DSL compiled at module load: names and
-  troop roles are inferred, Move 1 is implicit unless Move or Fly is explicit,
+  troop roles are inferred, printed actions use rule-like function notation
+  (`move(2)`, `bow(3,4)`), Move 1 is implicit unless Move or Fly is explicit,
   `P.`/`F.` qualify actions, and trigger phrases use `&` for extra effects.
-- Compact trigger and continuous-effect summaries are generated from those DSL phrases rather than a card-specific text table. Conditions and actions use the shared board icons; `is-bash-by` renders as `is ⚔️`, and `&`-joined actions remain together on one line.
+- Hover explanations, side-card summaries, and compact board-hex rule rows are
+  generated from parsed card action/rule text; the catalogue has no separately
+  maintained passive-description strings. Hover uses readable sentences, while
+  hex rows retain only the trigger/condition and operative icon/value. Conditions
+  and actions use the shared board icons; incoming Bash renders as `is ⚔️`, and
+  `&`-joined actions remain together on one line.
 - Friend/enemy qualifiers in generated summaries render only their operative word (`any`, `all`, `adjacent`, or `hero`) in the corresponding player color. `any-hex-friend` and `any-hex-enemy` render a dark friend/enemy `⬢`; a lone `deployed` condition is omitted from continuous-effect text. All catalogue and selected cards in the deck builder use the Red presentation.
 - Continuous rules use `condition :: status`, keeping their double-colon syntax distinct from one-shot `condition : action` triggers. Relationship words use the light player colors and `adjacent` is displayed as `adj`.
 - Trigger conditions distinguish `hit` (damage resolution occurred) from

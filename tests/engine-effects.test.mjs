@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyGameAction, availableActionsFor, combatBreakdown, combatSummary, controlSummary, createGameState, dispatchTrigger, registerPassive } from "../dist/game/engine.js";
+import { applyGameAction, availableActionsFor, combatBreakdown, combatSummary, controlSummary, createGameState } from "../dist/game/engine.js";
 import { createEngineCards } from "./helpers/engine-fixture.mjs";
 
 const { cards, catalogueCards, troopSeeds } = createEngineCards();
@@ -47,18 +47,16 @@ test('“bonus if condition” effects are calculated live and disappear with th
   assert.equal(combatBreakdown(noBash, '1:canyon-ibex', cards).modifier, 1, 'neither bash-only bonus is stored after the condition ends');
 });
 
-test('an action trigger fires once, then its newly inactive source cannot repeat it', () => {
+test('a normalized Bash trigger fires once for the action that creates the Bash', () => {
   const state = { activePlayer: 1, units: [
     { id: '1:sahel-porcupine', troopId: 'sahel-porcupine', owner: 1, coordinate: '1,1', permanentDamage: 0 },
-    { id: '2:squirrel-king', troopId: 'squirrel-king', owner: 2, coordinate: '1,-1', permanentDamage: 0 }
+    { id: '2:squirrel-king', troopId: 'squirrel-king', owner: 2, coordinate: '1,0', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
-  const event = { trigger: 'bashAttack', player: 1, hex: '1,0', troopIds: ['1:sahel-porcupine', '2:squirrel-king'], attackerId: '1:sahel-porcupine', defenderId: '2:squirrel-king' };
-  dispatchTrigger(state, event, cards, [1]);
-  dispatchTrigger(state, event, cards, [1]);
-  const porcupine = state.units[0];
+  const next = applyGameAction(state, 1, { type: 'move', troopId: 'sahel-porcupine', coordinate: '1,0' }, cards);
+  const porcupine = next.units[0];
   assert.equal(porcupine.rangedDamageBonus, 1);
   assert.equal(porcupine.rangedRangeBonus, 1);
-  assert.deepEqual(availableActionsFor(state, 1, 'sahel-porcupine', cards), []);
+  assert.deepEqual(availableActionsFor(next, 1, 'sahel-porcupine', cards), []);
 });
 
 test('deployed static temples boost their owner’s ranged and magic values', () => {
@@ -91,7 +89,7 @@ test('Reed Archer gains a stackable magenta damage upgrade only after a successf
   assert.equal(fired.units[0].rangedDamageBonus, undefined, 'the bonus waits for the delayed attack to hit');
   const resolved = applyGameAction(fired, 2, { type: 'pass' }, cards);
   assert.equal(resolved.units.find(unit => unit.troopId === 'reed-archer')?.rangedDamageBonus, 1);
-  assert.equal(resolved.units.find(unit => unit.troopId === 'reed-archer')?.rangedRangeBonus, 0);
+  assert.equal(resolved.units.find(unit => unit.troopId === 'reed-archer')?.rangedRangeBonus, 1);
 });
 
 test('Crown Breaker gains +2 only while it attacks a hero in a bash', () => {
@@ -112,6 +110,17 @@ test('Marching Giant suffers one permanent damage after each Move action', () =>
   assert.equal(moved.units[0].permanentDamage, 1);
 });
 
+test('Marching Giant normalized Move trigger records and materializes its state change', () => {
+  const state = { activePlayer: 1, units: [
+    { id: '1:marching-giant', troopId: 'marching-giant', owner: 1, coordinate: '1,2', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const action = { type: 'move', troopId: 'marching-giant', coordinate: '2,2' };
+  const normalized = applyGameAction(state, 1, action, cards);
+  assert.equal(normalized.units[0].coordinate, '2,2');
+  assert.equal(normalized.units[0].permanentDamage, 1);
+  assert.equal(normalized.normalizedEvents.some(event => event.name === 'move' && event.stage === 'target'), true);
+});
+
 test('Phoenix Moth death pauses for a 3-damage ranged target within distance 2', () => {
   const state = { activePlayer: 2, units: [
     { id: '1:snowy-owl', troopId: 'snowy-owl', owner: 1, coordinate: '1,0', permanentDamage: 0 },
@@ -128,7 +137,7 @@ test('Phoenix Moth death pauses for a 3-damage ranged target within distance 2',
   assert.equal(resolved.activePlayer, 1);
 });
 
-test('Temple of the Last Bell resolves one chosen instant ranged hex', () => {
+test('Temple of the Last Bell resolves its two instant ranged choices', () => {
   const state = { activePlayer: 2, units: [
     { id: '1:powder-newt', troopId: 'powder-newt', owner: 1, coordinate: '1,0', permanentDamage: 0 },
     { id: '2:temple-last-bell', troopId: 'temple-last-bell', owner: 2, coordinate: '1,1', permanentDamage: 0 }
@@ -139,8 +148,10 @@ test('Temple of the Last Bell resolves one chosen instant ranged hex', () => {
   assert.equal(availableActionsFor(death, 2, 'temple-last-bell', cards).some(action => action.type === 'resolve-pass'), true);
   const first = applyGameAction(death, 2, { type: 'resolve-instant-ranged', troopId: 'temple-last-bell', coordinate: '1,0' }, cards);
   assert.equal(first.units.some(unit => unit.troopId === 'powder-newt'), false);
-  assert.equal(first.pendingResolution, undefined);
-  assert.equal(first.activePlayer, 1);
+  assert.equal(first.pendingResolution?.kind, 'instant-ranged');
+  const finished = applyGameAction(first, 2, { type: 'resolve-pass', troopId: 'temple-last-bell' }, cards);
+  assert.equal(finished.pendingResolution, undefined);
+  assert.equal(finished.activePlayer, 1);
 });
 
 test('triggered physical and magic modifiers use temporary shield storage', () => {

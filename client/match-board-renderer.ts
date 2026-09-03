@@ -83,8 +83,8 @@ function renderServerMatchState(match: ServerMatchState): void {
   // A new revision is an authoritative action (or sandbox placement), not a
   // local selection echo. Clear the previous side's card/action before control
   // passes; both fixed trays share card IDs across their separate owners.
-  const previousMatch = state.serverMatch;
-  const stateAdvanced = previousMatch?.id === match.id && previousMatch.revision !== match.revision;
+  const previousMatch = state.serverRenderingPreview ? state.serverAuthoritativeMatch : state.serverMatch;
+  const stateAdvanced = !state.serverRenderingPreview && previousMatch?.id === match.id && previousMatch.revision !== match.revision;
   if (stateAdvanced && !state.replayingLastTurn && previousMatch
     && (match.events?.length ?? 0) > (previousMatch.events?.length ?? 0)) {
     state.lastTurnReplayBefore = structuredClone(previousMatch);
@@ -157,14 +157,15 @@ function renderServerMatchState(match: ServerMatchState): void {
   }
   state.serverMatch = match;
   const local = applyLocalPlayerView(match); if (!local) return;
+  const interactionMatch = state.serverRenderingPreview ? state.serverAuthoritativeMatch ?? match : match;
   if (state.serverSelectionRequestPending && match.selections?.[local] === state.serverRequestedTroopId) {
     state.serverSelectedTroopId = state.serverRequestedTroopId;
     state.serverSelectedAction = undefined;
     state.serverPendingAction = undefined;
     state.serverSelectionRequestPending = false;
   }
-  const awaitingLocalAction = match.status === 'active' && !match.winner
-    && (match.pendingResolution?.owner ?? match.activePlayer) === local;
+  const awaitingLocalAction = interactionMatch.status === 'active' && !interactionMatch.winner
+    && (interactionMatch.pendingResolution?.owner ?? interactionMatch.activePlayer) === local;
   boardAreaPanel.classList.toggle('awaiting-local-action', awaitingLocalAction);
   if (match.pendingResolution?.owner === local) {
     const pending = match.pendingResolution;
@@ -173,7 +174,7 @@ function renderServerMatchState(match: ServerMatchState): void {
     if (source) state.serverInspectedUnitId = source.id;
   }
   gameLayoutPanel.classList.remove('deck-building');
-  if (match.winner || (match.pendingResolution?.owner ?? match.activePlayer) !== local) { state.serverSelectedTroopId = undefined; state.serverSelectedAction = undefined; state.serverPendingAction = undefined; clearServerPreviewPath(); }
+  if (!state.serverRenderingPreview && (match.winner || (match.pendingResolution?.owner ?? match.activePlayer) !== local)) { state.serverSelectedTroopId = undefined; state.serverSelectedAction = undefined; state.serverPendingAction = undefined; clearServerPreviewPath(); }
   const selectedActions = match.selections?.[local] === state.serverSelectedTroopId ? match.legalActions?.[local] ?? [] : [];
   const actionTypes = new Set(selectedActions.map(action => action.type));
   if (state.serverSelectedTroopId && selectedActions.length > 0 && (!state.serverSelectedAction || !actionTypes.has(state.serverSelectedAction))) {
@@ -318,7 +319,7 @@ function renderServerMatchState(match: ServerMatchState): void {
   appendServerPreviewBash();
   appendServerBombs(match);
   appendConfirmedIgnitedBomb(match);
-  renderServerActionBar(match, local);
+  renderServerActionBar(interactionMatch, local);
   renderServerActionTargets();
   appendServerHexBorderOverlays();
   appendServerProjectiles(match);

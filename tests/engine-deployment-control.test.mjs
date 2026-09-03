@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyGameAction, availableActionsFor, combatBreakdown, combatSummary, controlSummary, createGameState, dispatchTrigger, registerPassive } from "../dist/game/engine.js";
+import { applyGameAction, availableActionsFor, combatBreakdown, combatSummary, controlSummary, createGameState } from "../dist/game/engine.js";
 import { createEngineCards } from "./helpers/engine-fixture.mjs";
 
 const { cards, catalogueCards, troopSeeds } = createEngineCards();

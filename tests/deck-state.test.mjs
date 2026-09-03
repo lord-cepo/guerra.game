@@ -203,12 +203,29 @@ test('every catalogue card exposes complete readable hover rules', () => {
     const troop = createTroopView(seed.id, 1);
     const rules = cardRuleDetails(troop);
     assert.doesNotMatch(rules[0], /^Deploy/);
-    assert.ok(rules.length >= seed.actions.length + 1, `${seed.name} should describe every action`);
+    assert.ok(rules.length >= seed.actions.length + (seed.rules?.length ?? 0) + 1, `${seed.name} should describe every action and normalized rule`);
     if (!seed.actions.some(action => action.kind === 'move' || action.kind === 'fly')) {
       assert.ok(rules.includes('Movement: this unit cannot move.'), `${seed.name} should explain that it is immobile`);
     }
-    if (seed.ruleDescription) assert.ok(rules.includes(seed.ruleDescription), `${seed.name} should explain its passive`);
   }
+});
+
+test('normalized card rules generate concise hex text and readable hover text', () => {
+  const monarch = createTroopView('wandering-monarch', 1);
+  assert.ok(boardDescriptionEntries(monarch).some(line => line.text === 'End: 🥾1'));
+  assert.ok(cardRuleDetails(monarch).includes('At the end of your turn: you may move up to 1 hex.'));
+
+  const tortoise = createTroopView('tortoise-emperor', 1);
+  assert.ok(boardDescriptionEntries(tortoise).some(line => line.text === 'End: +1 [[friend:adj]]'));
+  assert.ok(cardRuleDetails(tortoise).includes(
+    'At the end of your turn: each friendly unit adjacent to this unit gains +1 physical modifier until after this unit is hit.'
+  ));
+
+  const breaker = createTroopView('crown-breaker', 1);
+  assert.ok(boardDescriptionEntries(breaker).some(line => line.text === '⚔️ hero: +2'));
+  assert.ok(cardRuleDetails(breaker).includes(
+    'While this unit is bashing a hero, this unit gains +2 physical modifier.'
+  ));
 });
 
 test('hover rules pair every action notation with a plain-language explanation', () => {

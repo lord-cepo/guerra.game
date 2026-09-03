@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isBoardCoordinate } from '../dist/game/board.js';
-import { applyGameAction, availableActionsFor, combatSummary, controlSummary, createGameState, isUnitInactive, maximumHealth, unitId } from '../dist/game/engine.js';
+import { applyGameAction, availableActionsFor, combatSummary, controlSummary, createGameState, effectiveMaximumHealth, effectivePassivesFor, effectiveTroopActions, isUnitInactive, unitId } from '../dist/game/engine.js';
 
 const diagnosticSnapshotLimit = 100;
 
@@ -8,7 +8,7 @@ function compactDiagnosticState(state) {
   if (!state) return state;
   // These growing histories already live in the authoritative/final state.
   // Copying them into every diagnostic made persistence grow quadratically.
-  const { dashboard: _dashboard, events: _events, triggerEvents: _triggerEvents, legalActions: _legalActions, ...compact } = state;
+  const { dashboard: _dashboard, events: _events, normalizedEvents: _normalizedEvents, legalActions: _legalActions, ...compact } = state;
   return compact;
 }
 
@@ -105,7 +105,11 @@ export class MatchStore {
       turnCounts: structuredClone(state.turnCounts ?? {}),
       turnNumber: state.turnNumber ?? 0,
       defeatedTroopIds: [...(state.defeatedTroopIds ?? [])], revision: state.revision ?? 0,
-      events: structuredClone(state.events ?? []), triggerEvents: [],
+      rulesVersion: 3,
+      normalizedEvents: structuredClone(state.normalizedEvents ?? []),
+      ruleContributions: structuredClone(state.ruleContributions ?? []),
+      nextRuleContributionId: state.nextRuleContributionId ?? 1,
+      events: structuredClone(state.events ?? []),
       dashboard: structuredClone(state.dashboard ?? []), resolutionStack: [...(state.resolutionStack ?? [])], currentEventId: state.currentEventId, nextDashboardId: state.nextDashboardId ?? 1,
       deckOrder: { 1: [...state.decks[1]], 2: [...state.decks[2]] }
     };
@@ -201,6 +205,7 @@ export class MatchStore {
     return {
       id: match.id,
       revision: match.game.revision,
+      rulesVersion: 3,
       status: match.game.winner ? 'finished' : match.status,
       activePlayer: match.game.activePlayer,
       phase: match.game.phase ?? (match.game.pendingResolution ? 'end' : 'action'),
@@ -219,14 +224,13 @@ export class MatchStore {
         const id = unitId(unit);
         const bash = match.game.bashes.find(item => item.attackerId === id || item.defenderId === id);
         const combat = combatSummary(match.game, id, this.cardsById, bash?.target);
-        return { ...unit, id, currentHealth: combat.health, maxHealth: maximumHealth(unit, this.cardsById), inactive: isUnitInactive(match.game, unit), combat };
+        return { ...unit, id, currentHealth: combat.health, maxHealth: effectiveMaximumHealth(match.game, unit, this.cardsById), inactive: isUnitInactive(match.game, unit), combat, effectiveActions: effectiveTroopActions(match.game, unit, this.cardsById), effectivePassives: effectivePassivesFor(match.game, unit, this.cardsById) };
       }),
       defeatedTroopIds: [...(match.game.defeatedTroopIds ?? [])],
       effects: structuredClone(match.game.effects),
       bashes: structuredClone(match.game.bashes),
       bombs: structuredClone(match.game.bombs ?? []),
       pendingResolution: structuredClone(match.game.pendingResolution),
-      triggerEvents: structuredClone(match.game.triggerEvents?.slice(-100) ?? []),
       dashboard: structuredClone(match.game.dashboard ?? []),
       resolutionStack: [...(match.game.resolutionStack ?? [])],
       currentEventId: match.game.currentEventId,
@@ -235,7 +239,8 @@ export class MatchStore {
       turnNumber: match.game.turnNumber ?? 0,
       winner: match.game.winner,
       control: controlSummary(match.game, this.cardsById),
-      events: structuredClone(match.game.events?.slice(-100) ?? [])
+      events: structuredClone(match.game.events?.slice(-100) ?? []),
+      presentationEvents: structuredClone(match.game.normalizedEvents?.slice(-100) ?? [])
     };
   }
 
@@ -280,6 +285,10 @@ export class MatchStore {
       match.targetSelections ??= { 1: undefined, 2: undefined };
       match.sandboxFreePlacement ??= false;
       match.game.bombs ??= [];
+      match.game.rulesVersion = 3;
+      match.game.normalizedEvents ??= [];
+      match.game.ruleContributions ??= [];
+      match.game.nextRuleContributionId ??= (match.game.ruleContributions.at(-1)?.id ?? 0) + 1;
       match.game.phase ??= match.game.pendingResolution ? 'end' : 'action';
       match.game.dashboard ??= [];
       match.game.resolutionStack ??= [];
@@ -337,6 +346,24 @@ export class MatchStore {
     match.selections[player] = undefined;
     match.targetSelections[player] = undefined;
     return this.recordDiagnostic(match, { kind: 'action', player, nickname, action: structuredClone(action) });
+  }
+
+  previewAction(matchId, nickname, action, revision) {
+    const { match, player } = this.#matchAndPlayer(matchId, nickname);
+    if (revision !== match.game.revision) throw new Error('Preview is stale.');
+    if (match.status !== 'active' || !match.ready[1] || !match.ready[2]) throw new Error('Both players must be ready.');
+    if ((match.game.pendingResolution?.owner ?? match.game.activePlayer) !== player) throw new Error('It is not your turn.');
+    if (!action || typeof action.type !== 'string') throw new Error('Invalid preview action.');
+    if (action.type !== 'pass' && !match.decks[player].includes(action.troopId)) throw new Error('Troop is not in your deck.');
+    const projectedGame = applyGameAction(match.game, player, action, this.cardsById);
+    const projectedMatch = { ...match, game: projectedGame };
+    return {
+      baseRevision: revision,
+      projectedRevision: projectedGame.revision,
+      rulesVersion: 3,
+      match: this.publicState(projectedMatch),
+      presentationEvents: structuredClone((projectedGame.normalizedEvents ?? []).slice(match.game.normalizedEvents?.length ?? 0))
+    };
   }
 
   #rememberSandbox(match) {

@@ -1,4 +1,4 @@
-import type { UpgradableAbility } from '../game/cards.js';
+import type { PassiveKind, TroopAction, UpgradableAbility } from '../game/cards.js';
 import type { Coordinate } from '../game/board.js';
 import type { GameAction, PendingResolution, StackAction, TurnPhase } from '../game/engine.js';
 import type { Player } from '../game/types.js';
@@ -41,6 +41,8 @@ export interface ServerUnitState {
     total: number;
     controller?: Player;
   };
+  effectiveActions?: TroopAction[];
+  effectivePassives?: PassiveKind[];
 }
 
 export interface ServerEffectState {
@@ -75,22 +77,17 @@ export interface ServerGameEvent {
   origin?: Coordinate;
 }
 
-export interface ServerTriggerEvent {
-  trigger: string;
-  actionKind?: string;
-  player: Player;
-  hex?: Coordinate;
-  troopIds: string[];
-  actingTroopId?: string;
-  attackerId?: string;
-  defenderId?: string;
-  firstStrike?: {
-    unitId: string;
-    targetId: string;
-    firstDamage: number;
-    retaliationDamage: number;
-    targetSurvived: boolean;
-  };
+export interface ServerPresentationEvent {
+  id: number;
+  name: string;
+  stage: 'target' | 'resolved';
+  subject?: { kind: 'unit'; unitId: string } | { kind: 'hex'; coordinate: Coordinate };
+  object?: { kind: 'unit'; unitId: string } | { kind: 'hex'; coordinate: Coordinate };
+  origin?: Coordinate;
+  destination?: Coordinate;
+  success: boolean;
+  canceled?: boolean;
+  firstStrike?: { unitId: string; targetId: string; firstDamage: number; retaliationDamage: number; targetSurvived: boolean };
 }
 
 export interface ServerTargetSelection {
@@ -113,6 +110,7 @@ export interface ServerMatchState {
   status: 'active' | 'finished';
   winner?: Player;
   revision: number;
+  rulesVersion: number;
   decks: { 1: string[]; 2: string[] };
   deckChoices?: { 1?: number; 2?: number };
   units: ServerUnitState[];
@@ -132,5 +130,13 @@ export interface ServerMatchState {
   legalActions?: Partial<Record<Player, ServerLegalAction[]>>;
   control: Record<string, ServerControlState>;
   events?: ServerGameEvent[];
-  triggerEvents?: ServerTriggerEvent[];
+  presentationEvents?: ServerPresentationEvent[];
+}
+
+export interface ServerSemanticPreview {
+  baseRevision: number;
+  projectedRevision: number;
+  rulesVersion: number;
+  match: ServerMatchState;
+  presentationEvents: ServerPresentationEvent[];
 }

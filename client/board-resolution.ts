@@ -10,7 +10,7 @@ import {
   shieldFrameDuration,
 } from './board-animation-timing.js';
 import type { ServerProjectile } from './board-projectiles.js';
-import type { ServerBashState, ServerEffectState, ServerMatchState, ServerTriggerEvent, ServerUnitState } from './protocol.js';
+import type { ServerBashState, ServerEffectState, ServerMatchState, ServerPresentationEvent, ServerUnitState } from './protocol.js';
 
 export interface DamageResolutionAnimation {
   targetId: string;
@@ -36,7 +36,7 @@ export interface BashResolutionAnimation {
   winnerId?: string;
   continues: boolean;
   delay: number;
-  firstStrike?: NonNullable<ServerTriggerEvent['firstStrike']>;
+  firstStrike?: NonNullable<ServerPresentationEvent['firstStrike']>;
 }
 
 export interface GoreMovementResolution {
@@ -243,18 +243,18 @@ export function resolvedBombExplosion(previous: ServerMatchState | undefined, ne
 export function resolvedBashAnimations(previous: ServerMatchState | undefined, next: ServerMatchState, options: ResolutionProjectionOptions): BashResolutionAnimation[] {
   if (!previous || previous.id !== next.id) return [];
   const previousTriggerCounts = new Map<string, number>();
-  for (const event of previous.triggerEvents ?? []) {
+  for (const event of previous.presentationEvents ?? []) {
     const key = JSON.stringify(event);
     previousTriggerCounts.set(key, (previousTriggerCounts.get(key) ?? 0) + 1);
   }
-  const newBashResolutions = (next.triggerEvents ?? []).filter(event => {
+  const newBashResolutions = (next.presentationEvents ?? []).filter(event => {
     const key = JSON.stringify(event);
     const previousCount = previousTriggerCounts.get(key) ?? 0;
     if (previousCount > 0) {
       previousTriggerCounts.set(key, previousCount - 1);
       return false;
     }
-    return event.trigger === 'bashResolved';
+    return event.name === 'bash' && event.stage === 'resolved';
   });
   const latest = next.events?.at(-1);
   const playsConfirmedShield = options.replayingLastTurn || latest?.player !== options.localPlayer;
@@ -264,14 +264,14 @@ export function resolvedBashAnimations(previous: ServerMatchState | undefined, n
       ? projectileTravelDuration + shieldFrameDuration * options.shieldFrameCount
       : 0;
   return previous.bashes
-    .filter(bash => newBashResolutions.some(event => event.hex === bash.target && event.attackerId === bash.attackerId && event.defenderId === bash.defenderId))
+    .filter(bash => newBashResolutions.some(event => event.destination === bash.target && event.subject?.kind === 'unit' && event.subject.unitId === bash.attackerId && event.object?.kind === 'unit' && event.object.unitId === bash.defenderId))
     .flatMap(bash => {
       const attacker = previous.units.find(unit => unit.id === bash.attackerId);
       const defender = previous.units.find(unit => unit.id === bash.defenderId);
       if (!attacker || !defender) return [];
       const survivors = [attacker, defender].filter(unit => next.units.some(candidate => candidate.id === unit.id));
       const continues = next.bashes.some(candidate => candidate.attackerId === bash.attackerId && candidate.defenderId === bash.defenderId && candidate.target === bash.target);
-      const resolution = newBashResolutions.find(event => event.hex === bash.target && event.attackerId === bash.attackerId && event.defenderId === bash.defenderId);
+      const resolution = newBashResolutions.find(event => event.destination === bash.target && event.subject?.kind === 'unit' && event.subject.unitId === bash.attackerId && event.object?.kind === 'unit' && event.object.unitId === bash.defenderId);
       const resolvesPendingGore = previous.effects.some(effect => effect.kind === 'gore' && effect.target === bash.target
         && effect.sourceUnitId === bash.attackerId && effect.targetUnitId === bash.defenderId);
       return [{

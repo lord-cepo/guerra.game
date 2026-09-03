@@ -291,6 +291,12 @@ webSocketServer.on('connection', socket => {
         if (state.status === 'finished') persistence.persistMatchLog(message.matchId, 'match-finished');
         return;
       }
+      if (message.type === 'preview') {
+        if (!socket.matchId || !socket.nickname || socket.matchId !== message.matchId) throw new Error('Join the match first.');
+        const preview = matchStore.previewAction(message.matchId, socket.nickname, message.action, message.revision);
+        socket.send(JSON.stringify({ type: 'preview', requestId: message.requestId, preview }));
+        return;
+      }
       if (message.type === 'select') {
         if (!socket.matchId || !socket.nickname || socket.matchId !== message.matchId) throw new Error('Join the match first.');
         const state = matchStore.setSelection(message.matchId, socket.nickname, message.troopId, message.target);

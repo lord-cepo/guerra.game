@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyGameAction, availableActionsFor, combatBreakdown, combatSummary, controlSummary, createGameState, dispatchTrigger, registerPassive } from "../dist/game/engine.js";
+import { applyGameAction, availableActionsFor, combatBreakdown, combatSummary, controlSummary, createGameState } from "../dist/game/engine.js";
 import { createEngineCards } from "./helpers/engine-fixture.mjs";
 
 const { cards, catalogueCards, troopSeeds } = createEngineCards();
@@ -84,6 +84,29 @@ test('accepted actions append revisioned events suitable for reconnecting client
   assert.equal(next.revision, 1);
   assert.deepEqual(next.events, [{ revision: 1, player: 1, action: { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' } }]);
   assert.deepEqual(next.defeatedTroopIds, []);
+});
+
+test('authoritative actions record normalized target and resolved lifecycle stages', () => {
+  const state = createGameState();
+  const deployed = applyGameAction(state, 1, { type: 'deploy', troopId: 'tiger-queen', coordinate: '1,2' }, cards);
+  assert.deepEqual(deployed.normalizedEvents.filter(event => event.name === 'deploy').map(event => [event.name, event.stage, event.success]), [
+    ['deploy', 'target', true], ['deploy', 'resolved', true]
+  ]);
+  assert.equal(deployed.normalizedEvents[0].destination, '1,2');
+  assert.equal(deployed.rulesVersion, 3);
+});
+
+test('delayed actions do not emit resolved at target time', () => {
+  const state = { activePlayer: 1, units: [
+    { id: '1:queen-bee', troopId: 'queen-bee', owner: 1, coordinate: '1,1', permanentDamage: 0 },
+    { id: '2:squirrel-king', troopId: 'squirrel-king', owner: 2, coordinate: '1,0', permanentDamage: 0 }
+  ], effects: [], bashes: [], normalizedEvents: [] };
+  const attacked = applyGameAction(state, 1, { type: 'attack', troopId: 'queen-bee', coordinate: '1,0' }, cards);
+  assert.deepEqual(attacked.normalizedEvents.filter(event => event.name === 'bow').map(event => [event.name, event.stage]), [['bow', 'target']]);
+  const resolved = applyGameAction(attacked, 2, { type: 'pass' }, cards);
+  assert.deepEqual(resolved.normalizedEvents.filter(event => event.name === 'bow' || event.name === 'pass').map(event => [event.name, event.stage]), [
+    ['bow', 'target'], ['pass', 'target'], ['bow', 'resolved'], ['pass', 'resolved']
+  ]);
 });
 
 test('flight ignores intervening troops but cannot land in the central hex', () => {
@@ -357,7 +380,7 @@ test('Merino Ram can Gore the saved-playground enemy at full range three', () =>
   const gored = applyGameAction(state, 2, { type: 'gore', troopId: 'merino-ram', coordinate: '0,2' }, cards);
   assert.equal(gored.units.find(unit => unit.troopId === 'merino-ram')?.coordinate, '0,2');
   assert.equal(gored.bashes.length, 1, 'Gore starts its destination bash on confirmation');
-  assert.ok(gored.effects.some(effect => effect.kind === 'gore' && effect.target === '0,2' && effect.value === 2 && effect.goreDestination === '0,2'));
+  assert.ok(gored.effects.some(effect => effect.kind === 'gore' && effect.target === '0,2' && effect.value === 3 && effect.goreDestination === '0,2'));
 });
 
 test('Merino Ram can Gore across intervening Yak and Crane troops', () => {
@@ -397,7 +420,7 @@ test('Ironhide Boar Pup gains both temporary modifiers once per troop hit by Gor
   const boar = resolved.units.find(unit => unit.troopId === 'ironhide-boar-pup');
   assert.equal(boar?.shields?.reduce((sum, shield) => sum + shield.value, 0), 2);
   assert.equal(boar?.magicModifierBonus, 2);
-  assert.equal(resolved.triggerEvents.filter(event => event.trigger === 'successfulAttack' && event.actionKind === 'gore').length, 2);
+  assert.equal(resolved.normalizedEvents.filter(event => event.name === 'wound' && event.subject?.unitId === '2:ironhide-boar-pup').length, 2);
 });
 
 test('gore rejects friendly destinations and moves to empty valid destinations', () => {

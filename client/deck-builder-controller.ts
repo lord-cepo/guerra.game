@@ -100,11 +100,15 @@ export function createDeckBuilderController(options: DeckBuilderOptions): DeckBu
     const tokens = searchText.toLocaleLowerCase().trim().split(/\s+/u).filter(Boolean);
     const types = tokens.filter(token => token.startsWith('t:')).map(token => token.slice(2)).filter(Boolean);
     const names = tokens.filter(token => !token.startsWith('t:'));
-    const actions = [...troop.actions, ...(troop.triggers ?? []).map(trigger => trigger.action)].flatMap(action => {
+    const actions = troop.actions.flatMap(action => {
       const aliases = action.kind === 'ranged' ? ['attack'] : action.kind === 'fire' ? ['magic'] : [];
       if (action.kind === 'defense' && action.type?.includes('magic')) aliases.push('magic-defense');
       return [action.kind, ...aliases];
     });
+    for (const rule of catalogueById.get(troop.cardId)?.rules ?? []) {
+      if (rule.kind !== 'trigger') continue;
+      for (const consequence of rule.consequences) if (consequence.kind === 'event') actions.push(consequence.event.action.name);
+    }
     if (troop.selfMagicDefense !== undefined) actions.push('self-magic-defense');
     return names.every(term => `${troop.name ?? ''} ${troop.cardId}`.toLocaleLowerCase().includes(term)) && types.every(type => actions.includes(type));
   }
