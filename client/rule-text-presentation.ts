@@ -28,11 +28,12 @@ function compactAction(phrase: RulePhrase): string {
   const values = phrase.action.parameters;
   const glyph = glyphs[phrase.action.name] ?? phrase.action.name;
   const prefix = qualifierPrefix(phrase);
-  if (!values.length) return `${prefix}${glyph}`;
-  if (values.length === 1) return phrase.action.name === 'move' || phrase.action.name === 'fly'
+  const rendered = !values.length ? `${prefix}${glyph}`
+    : values.length === 1 ? phrase.action.name === 'move' || phrase.action.name === 'fly'
     ? `${prefix}${glyph}${values[0] ?? '_'}`
-    : `${values[0] ?? '_'}${prefix}${glyph}`;
-  return `${values[0] ?? '_'}${prefix}${glyph}${values[1] ?? '_'}`;
+    : `${values[0] ?? '_'}${prefix}${glyph}`
+    : `${values[0] ?? '_'}${prefix}${glyph}${values[1] ?? '_'}`;
+  return phrase.action.name === 'mshield' ? `~${rendered}~` : rendered;
 }
 
 function relationMarker(query: RuleFieldQuery, content: string): string {
@@ -108,7 +109,7 @@ function compactCondition(condition: RuleObservableCondition): string {
 
 function compactAnchor(phrase: RulePhrase): string {
   if (phrase.action.name === 'bash' && phrase.object?.kind === 'reference' && phrase.object.reference === 'self') return 'is ⚔️';
-  if (phrase.action.name === 'deploy') return `Deploy${compactEntity(phrase.subject) ? ` ${compactEntity(phrase.subject)}` : ''}`;
+  if (phrase.action.name === 'deploy') return `Deploy${phrase.object ? ` ${compactEntity(phrase.object)}` : ''}`;
   const subject = compactEntity(phrase.subject);
   return [subject, compactAction(phrase)].filter(Boolean).join(' ');
 }
@@ -154,6 +155,8 @@ function selectorWords(selector: ParsedHaveRule['selector'], plural = false): st
 }
 
 function queryWords(query: RuleFieldQuery, plural: boolean): string {
+  if (query.side === 'opp' && !query.owner && !query.entityType) return plural ? 'hexes on the enemy side' : 'a hex on the enemy side';
+  if (query.side === 'you' && !query.owner && !query.entityType) return plural ? 'hexes on your side' : 'a hex on your side';
   const owner = query.owner === 'you' ? 'friendly ' : query.owner === 'opp' ? 'enemy '
     : query.excludedOwner === 'you' ? 'non-friendly ' : query.excludedOwner === 'opp' ? 'non-enemy ' : '';
   const type = query.entityType ?? 'unit';
@@ -228,7 +231,7 @@ function anchorWords(rule: Extract<ParsedRule, { kind: 'trigger' }>): string {
   }
   const phrase = rule.anchor;
   if (phrase.action.name === 'die') return 'When this unit dies';
-  if (phrase.action.name === 'deploy') return 'When this unit deploys';
+  if (phrase.action.name === 'deploy') return `When this unit deploys${phrase.object ? ` to ${entityWords(phrase.object)}` : ''}`;
   if (phrase.action.name === 'bash' && phrase.object?.kind === 'reference' && phrase.object.reference === 'self') return 'When this unit is bashed';
   const subject = entityWords(phrase.subject);
   const target = phrase.object ? ` ${entityWords(phrase.object)}` : '';

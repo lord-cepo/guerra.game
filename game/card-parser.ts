@@ -103,19 +103,35 @@ export function parseActions(text: string | undefined, context = 'actions', impl
 
 export function parseCard(source: CardSource): TroopSeed {
   const title = source.name ?? source.id.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
-  const regions = source.deploymentRegions.split(/\s+/).filter(region => region !== 'enemy') as RegionType[];
-  const parsedActions = parseActions(source.actions, `${source.id} actions`, (source.role ?? 'troop') !== 'temple');
-  const rules = source.rules?.map((rule, index) => parseRule(rule, `${source.id} rule ${index + 1}`));
-  const selfDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && !action.type?.includes('magic'));
-  const selfMagicDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && action.type?.includes('magic'));
-  const actions = parsedActions.filter(action => action !== selfDefense && action !== selfMagicDefense);
-  return {
-    id: source.id, name: title, role: source.role ?? 'troop', baseHealth: source.baseHealth,
-    deploymentRegions: regions, actions,
-    ...(source.deploymentRegions.split(/\s+/).includes('enemy') ? { deploymentRule: 'enemy-region' as const } : {}),
-    ...(source.passives ? { passives: source.passives.split(/\s+/) as PassiveKind[] } : {}),
-    ...(selfDefense ? { selfDefense: Number(selfDefense.amount ?? 0) } : {}),
-    ...(selfMagicDefense ? { selfMagicDefense: Number(selfMagicDefense.amount ?? 0) } : {}),
-    ...(rules ? { rules, ruleSources: [...(source.rules ?? [])], ruleIds: [...(source.ruleIds ?? [])] } : {})
-  };
+  try {
+    const regions = source.deploymentRegions.split(/\s+/).filter(region => region !== 'enemy') as RegionType[];
+    const parsedActions = parseActions(source.actions, `${source.id} actions`, (source.role ?? 'troop') !== 'temple');
+    const rules = source.rules?.map((rule, index) => parseRule(rule, `${source.id} rule ${index + 1}`));
+    const selfDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && !action.type?.includes('magic'));
+    const selfMagicDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && action.type?.includes('magic'));
+    const actions = parsedActions.filter(action => action !== selfDefense && action !== selfMagicDefense);
+    return {
+      id: source.id, name: title, role: source.role ?? 'troop', baseHealth: source.baseHealth,
+      deploymentRegions: regions, actions,
+      ...(source.deploymentRegions.split(/\s+/).includes('enemy') ? { deploymentRule: 'enemy-region' as const } : {}),
+      ...(source.passives ? { passives: source.passives.split(/\s+/) as PassiveKind[] } : {}),
+      ...(selfDefense ? { selfDefense: Number(selfDefense.amount ?? 0) } : {}),
+      ...(selfMagicDefense ? { selfMagicDefense: Number(selfMagicDefense.amount ?? 0) } : {}),
+      ...(rules ? { rules, ruleSources: [...(source.rules ?? [])], ruleIds: [...(source.ruleIds ?? [])] } : {})
+    };
+  } catch (cause) {
+    const parserMessage = cause instanceof Error ? cause.message : String(cause);
+    const cardInfo = {
+      id: source.id,
+      name: title,
+      role: source.role ?? 'troop',
+      baseHealth: source.baseHealth,
+      deploymentRegions: source.deploymentRegions,
+      ...(source.actions !== undefined ? { actions: source.actions } : {}),
+      ...(source.passives !== undefined ? { passives: source.passives } : {}),
+      ...(source.rules !== undefined ? { rules: source.rules } : {}),
+      ...(source.ruleIds !== undefined ? { ruleIds: source.ruleIds } : {})
+    };
+    throw new Error(`Failed to parse card:\n${JSON.stringify(cardInfo, null, 2)}\nParser error: ${parserMessage}`, { cause });
+  }
 }

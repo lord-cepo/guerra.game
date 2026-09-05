@@ -95,6 +95,19 @@ test('Dune Scorpion deploys only into a controlled enemy intermediate region', (
   assert.throws(() => applyGameAction(homeIntermediate, 1, { type: 'deploy', troopId: 'dune-scorpion', coordinate: '0,1' }, cards), /do not control/);
 });
 
+test('Duelist Scorpion resolves its enemy-side deploy trigger after entering the destination hex', () => {
+  const state = { activePlayer: 1, units: [
+    { troopId: 'tiger-queen', owner: 1, coordinate: '1,2', permanentDamage: 0 },
+    { troopId: 'queen-bee', owner: 1, coordinate: '0,-2', permanentDamage: 0 }
+  ], effects: [], bashes: [], lastActingTroopId: {} };
+  const next = applyGameAction(state, 1, { type: 'deploy', troopId: 'duelist-scorpion', coordinate: '0,-1' }, cards);
+  const duelist = next.units.find(unit => unit.troopId === 'duelist-scorpion');
+
+  assert.deepEqual(duelist?.shields?.map(shield => shield.value), [3]);
+  assert.equal(duelist?.magicModifierBonus, 3);
+  assert.deepEqual(next.normalizedEvents?.at(-1)?.object, { kind: 'hex', coordinate: '0,-1' });
+});
+
 test('Ironscale Rhino deploys only into a controlled enemy starting region', () => {
   const state = { activePlayer: 1, units: [
     { troopId: 'tiger-queen', owner: 1, coordinate: '-1,-2', permanentDamage: 0 }

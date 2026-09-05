@@ -262,6 +262,15 @@ export function evaluateRuleState(state: RuleState, context: RuleEvaluationConte
 function bindingMatches(pattern: RuleEntity | undefined, actual: RuleBinding | undefined, context: RuleEvaluationContext): boolean {
   if (!pattern) return actual === undefined;
   if (!actual) return false;
+  if (pattern.kind === 'reference') {
+    const expected = pattern.reference === 'self' ? context.self : pattern.reference === 'subj' ? context.subj : context.obj;
+    if (!expected) return false;
+    if (expected.kind === 'unit' && actual.kind === 'unit') return expected.unitId === actual.unitId;
+    if (expected.kind === 'hex' && actual.kind === 'hex') return expected.coordinate === actual.coordinate;
+    const expectedCoordinate = coordinateOf(expected, context);
+    const actualCoordinate = coordinateOf(actual, context);
+    return Boolean(expectedCoordinate && expectedCoordinate === actualCoordinate);
+  }
   const actualCoordinate = coordinateOf(actual, context);
   if (!actualCoordinate) return false;
   const selected = selectRuleHexes(pattern, context);

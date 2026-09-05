@@ -173,7 +173,7 @@ const cardSources: readonly CardSource[] = [
     baseHealth: 2,
     deploymentRegions: 'intermediate',
     actions: 'move(2), stun(1,1)',
-    rules: ['deploy s:opp : T.shield(3,0) & T.mshield(3,0)'], ruleIds: ['duelist-deploy']
+    rules: ['self deploy s:opp : T.shield(3,0) & T.mshield(3,0)'], ruleIds: ['duelist-deploy']
   },
   {
     id: 'needle-peacock',
@@ -187,7 +187,7 @@ const cardSources: readonly CardSource[] = [
     baseHealth: 4,
     deploymentRegions: 'intermediate',
     passives: 'titanium',
-    rules: ['up-mod(0,-3) when deployed'], ruleIds: ['iron-bell-deploy']
+    rules: ['self deploy _ : self up-mod(0,-3)'], ruleIds: ['iron-bell-deploy']
   },
   {
     id: 'merino-ram',
@@ -336,14 +336,14 @@ const cardSources: readonly CardSource[] = [
     baseHealth: 2,
     deploymentRegions: 'intermediate',
     actions: 'fly(2)',
-    rules: ['die : bow(3,2)'], ruleIds: ['death-burst']
+    rules: ['self die _ : bow(3,2)'], ruleIds: ['death-burst']
   },
   {
     id: 'pine-processionary',
     baseHealth: 1,
     deploymentRegions: 'starting',
     actions: 'move(2)',
-    rules: ['die : revive o:you dead'], ruleIds: ['revive']
+    rules: ['self die _ : revive'], ruleIds: ['revive']
   },
   {
     id: 'canyon-ibex',
@@ -540,7 +540,7 @@ const cardSources: readonly CardSource[] = [
     role: 'temple',
     baseHealth: 2,
     deploymentRegions: 'starting intermediate',
-    rules: ['self die : F.bow(3,3)'], ruleIds: ['last-bell']
+    rules: ['self die _ : F.bow(3,3)'], ruleIds: ['last-bell']
   },
   {
     id: 'temple-marches',

@@ -21,7 +21,7 @@ function fixture() {
 
 test('stored state materializes a phrase binding into a concrete unit ID', () => {
   const { state, context } = fixture();
-  const rule = parseRule('self deploy : subj up-mod(1,2) removed-after subj bow-resolved _');
+  const rule = parseRule('self deploy _ : subj up-mod(1,2) removed-after subj bow-resolved _');
   const consequence = rule.consequences[0];
   const created = createStoredContributions(state, 'test-rule', '1:tiger-queen', consequence.state, consequence.lifetime, 7, context);
   assert.equal(created.ok, true);
@@ -36,8 +36,8 @@ test('stored state materializes a phrase binding into a concrete unit ID', () =>
 test('until cleans before an event and removed-after cleans only after success', () => {
   const { state, context } = fixture();
   for (const source of [
-    'self deploy : self up-mod(1,0) until self bow _',
-    'self deploy : self up-mod(2,0) removed-after self bow-resolved _'
+    'self deploy _ : self up-mod(1,0) until self bow _',
+    'self deploy _ : self up-mod(2,0) removed-after self bow-resolved _'
   ]) {
     const consequence = parseRule(source).consequences[0];
     createStoredContributions(state, source, '1:tiger-queen', consequence.state, consequence.lifetime, 1, context);
@@ -54,7 +54,7 @@ test('until cleans before an event and removed-after cleans only after success',
 
 test('up-life applies starting-life delta before clamping actual life', () => {
   const { state, context } = fixture();
-  const consequence = parseRule('self deploy : self up-life(10,-2) permanent').consequences[0];
+  const consequence = parseRule('self deploy _ : self up-life(10,-2) permanent').consequences[0];
   createStoredContributions(state, 'life', '1:tiger-queen', consequence.state, consequence.lifetime, 1, context);
   const effective = effectiveUnitState(state, state.units[0], cards);
   assert.equal(effective.startingLife, 3);

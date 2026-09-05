@@ -52,10 +52,10 @@ export const ruleWords = {
   target: { kind: 'verb', arity: 2, eventClass: 'result' },
   hit: { kind: 'verb', arity: 2, eventClass: 'result', note: 'Damage resolution reached the target, including zero damage.' },
   wound: { kind: 'verb', arity: 2, eventClass: 'result', note: 'The target lost positive life.' },
-  die: { kind: 'verb', arity: 1, eventClass: 'state-change', aliases: ['dies'] },
-  deploy: { kind: 'verb', arity: 1, eventClass: 'state-change', aliases: ['deploys'] },
+  die: { kind: 'verb', arity: 2, eventClass: 'state-change', aliases: ['dies'], note: 'The subject is the defeated unit and the object is its last occupied hex.' },
+  deploy: { kind: 'verb', arity: 2, eventClass: 'state-change', aliases: ['deploys'], note: 'The subject is the deployed unit and the object is its destination hex.' },
   revive: { kind: 'verb', arity: 1, eventClass: 'state-change' },
-  activate: { kind: 'verb', arity: 1, eventClass: 'state-change', aliases: ['act'] },
+  activate: { kind: 'verb', arity: 2, eventClass: 'state-change', aliases: ['act'], note: 'The subject is the activated unit and the object is its current hex.' },
 
   wounded: { kind: 'property', observable: true, contributable: false },
   deployed: { kind: 'property', observable: true, contributable: false },

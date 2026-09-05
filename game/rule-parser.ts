@@ -185,7 +185,7 @@ const entityTypes = new Set<RuleEntityType>(['bomboff', 'bombon', 'temple', 'tro
 const phases = new Set<RulePhase>([
   'start', 'action', 'action-resolve', 'combat-resolve', 'end', 'opponent-start', 'opponent-end'
 ]);
-const noObjectVerbs = new Set(['die', 'deploy', 'revive', 'activate']);
+const noObjectVerbs = new Set(['revive']);
 const rangeOnlyActions = new Set(['light', 'bomb-defuse']);
 const movementVerbs = new Set(['move', 'fly', 'gore']);
 function parsePredicate<T extends string>(token: string, values: ReadonlySet<T>, context: string): RulePredicate<T> | undefined {
@@ -462,7 +462,7 @@ function parseRulePhrase(text: string, context: string, consequence: boolean, al
   if (resolved) action.name = actionName;
   validateRuleAction(action, `${context} action`);
   const endpoint: RuleEndpoint | undefined = movement?.[2] === 'from' ? 'origin' : movement?.[2] === 'to' ? 'destination' : undefined;
-  const verb = movement?.[1] ?? rawAction.name;
+  const verb = actionName;
 
   let object: RuleEntity | undefined;
   let targetPolicy: 'all' | undefined;

@@ -11,6 +11,23 @@ test('card parser derives names, troop role, regions, and function-form actions'
   assert.deepEqual(card.actions, [{ kind: 'move', range: 1 }, { kind: 'fire', amount: 2, range: 3 }]);
 });
 
+test('card parse errors include the complete raw card information', () => {
+  const source = {
+    id: 'broken-heron', name: 'Broken Heron', role: 'hero', baseHealth: 4,
+    deploymentRegions: 'starting', actions: 'move(2)', passives: 'steady',
+    rules: ['self die : up-mod(1,0)'], ruleIds: ['broken-rule']
+  };
+  assert.throws(() => parseCard(source), error => {
+    assert.match(error.message, /Failed to parse card/);
+    assert.match(error.message, /"name": "Broken Heron"/);
+    assert.match(error.message, /"rules": \[/);
+    assert.match(error.message, /self die : up-mod\(1,0\)/);
+    assert.match(error.message, /Parser error: broken-heron rule 1 anchor/);
+    assert.ok(error.cause instanceof Error);
+    return true;
+  });
+});
+
 test('Fly suppresses implicit Move and qualified attacks compile in order', () => {
   assert.deepEqual(parseActions('fly(2), P.F.T.bow(1,3)'), [
     { kind: 'fly', range: 2 },
@@ -29,6 +46,16 @@ test('enemy deployment regions and normalized rules compile explicitly', () => {
   assert.equal(card.deploymentRule, 'enemy-region');
   assert.equal(card.rules[0].kind, 'trigger');
   assert.equal(card.rules[0].consequences[0].kind, 'distributed-state');
+});
+
+test('state-change location verbs bind a unit subject and hex object', () => {
+  const deploy = parseRule('self deploy s:opp : T.shield(3,0)');
+  assert.equal(deploy.anchor.action.name, 'deploy');
+  assert.deepEqual(deploy.anchor.subject, { kind: 'reference', reference: 'self' });
+  assert.deepEqual(deploy.anchor.object, { kind: 'query', selector: 'any', side: 'opp' });
+  assert.equal(parseRule('self die _ : F.bow(3,3)').anchor.object.kind, 'wildcard');
+  assert.equal(parseRule('self activate _ : up-life(1,0)').anchor.object.kind, 'wildcard');
+  assert.equal(parseRule('self die _ : revive').consequences[0].event.object, undefined);
 });
 
 test('normalized rule entities classify hex filters and default to any', () => {
@@ -228,7 +255,8 @@ test('normalized rule parser rejects malformed group ordering and binary verbs w
   assert.throws(() => parseRuleEntity('hero-friend'), /unit-region-type/);
   assert.throws(() => parseRuleEntity('enemy&front'), /mixes attribute groups/);
   assert.throws(() => parseRule('self hit : mod10 self'), /needs an object/);
-  assert.throws(() => parseRule('self die _ : mod10 self'), /cannot have an object/);
+  assert.throws(() => parseRule('self die : mod10 self'), /needs an object/);
+  assert.throws(() => parseRule('self revive _ : mod10 self'), /cannot have an object/);
   assert.throws(() => parseRule('self teleports _ : mod10 self'), /unknown verb/);
   assert.throws(() => parseRule('self lightXX p:bomb-off : mod10'), /only its range parameter/);
   assert.throws(() => parseRule('self mend(1,_) self while self wounded'), /unknown property/);

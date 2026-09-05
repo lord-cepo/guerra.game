@@ -66,10 +66,19 @@ This is a concise handoff, not a changelog. Update it when a feature group or ar
   `removed-after` cleanup complete, and consequences then execute before later
   combat/End/Start phase processing. Death triggers use the source's last-known
   board snapshot after that source has been removed.
+- Deploy, Die, and Activate use uniform binary location events: `subj` is the
+  affected unit and `obj` is its destination, last occupied, or current hex.
+  Revive remains unary with the selected defeated unit as its subject. This
+  permits rules such as `self deploy s:opp` without conflating a unit with its
+  location.
 - The catalogue uses a compact textual DSL compiled at module load: names and
   troop roles are inferred, printed actions use rule-like function notation
   (`move(2)`, `bow(3,4)`), Move 1 is implicit unless Move or Fly is explicit,
   `P.`/`F.` qualify actions, and trigger phrases use `&` for extra effects.
+- Card compilation failures include the card's inferred name, identity, role,
+  health, deployment regions, raw actions, passives, rules, and rule IDs before
+  the original parser error, making malformed catalogue entries diagnosable
+  directly from startup and test output.
 - Hover explanations, side-card summaries, and compact board-hex rule rows are
   generated from parsed card action/rule text; the catalogue has no separately
   maintained passive-description strings. Hover uses readable sentences, while

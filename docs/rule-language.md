@@ -175,8 +175,8 @@ A trigger may instead create stored state. Its omitted lifetime defaults to
 
 ```text
 o:opp fire self : titanium until opponent-end
-self deploy : up-mod(1,0) removed-after _ hit self
-self deploy : steady
+self deploy _ : up-mod(1,0) removed-after _ hit self
+self deploy _ : steady
 ```
 
 `until E` removes the state before `E` resolves, so it does not participate in
@@ -350,7 +350,11 @@ T.bomb(2,_) == T.bomb2x
 
 Entity operands and user parameters are separate. A binary action has an
 origin/subject and destination/object even when it has no numeric parameters.
-Unary verbs (`die`, `deploy`, `revive`, `activate`) omit the object.
+`deploy`, `die`, and `activate` are binary location events: their subject is a
+unit and their object is respectively its destination, last occupied, or
+current hex. The subject and object therefore share a coordinate at the event
+boundary but retain different entity types. `revive` remains unary: its subject
+is the selected defeated unit and it has no location object.
 An event pattern may omit the complete numeric vector to match any printed
 values. If it supplies any numeric parameter, it must supply the action's full
 vector, using `_` for an unconstrained position.
@@ -500,10 +504,10 @@ transition.
 | `target` | authoritative legal target confirmed |
 | `hit` | damage resolution reached the target |
 | `wound` | target lost positive life |
-| `die` | unary transition to defeated |
-| `deploy` | unary transition to deployed |
-| `revive` | unary transition out of defeated |
-| `activate` | unary transition to active |
+| `die` | unit transitions to defeated; object is its last occupied hex |
+| `deploy` | unit transitions to deployed; object is its destination hex |
+| `revive` | unary transition of the selected defeated unit |
+| `activate` | unit transitions to active; object is its current hex |
 
 ### Snapshot properties
 

@@ -17,7 +17,7 @@ test('the expansion cards expose their revised health, actions, and normalized r
   assert.deepEqual(cards.get('raven-prince').actions, [{ kind: 'fly', range: 3 }]);
   assert.deepEqual(cards.get('raven-prince').ruleSources, ['end : stun(1,1)']);
   assert.equal(cards.get('temple-last-bell').baseHealth, 2);
-  assert.deepEqual(cards.get('temple-last-bell').ruleSources, ['self die : F.bow(3,3) & F.bow(3,3)']);
+  assert.deepEqual(cards.get('temple-last-bell').ruleSources, ['self die _ : F.bow(3,3) & F.bow(3,3)']);
   assert.equal(cards.get('temple-marches').baseHealth, 2);
   assert.deepEqual(cards.get('tortoise-emperor').actions, []);
   assert.equal(cards.get('tortoise-emperor').rules[0].consequences[0].kind, 'distributed-state');

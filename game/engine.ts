@@ -461,7 +461,8 @@ function remove(state: GameState, unit: UnitState, cards: ReadonlyMap<string, Tr
   if (troop.rules?.some(rule => rule.kind === 'trigger' && rule.anchor.kind === 'relation' && rule.anchor.action.name === 'die')) {
     const event: NormalizedEventRecord = {
       id: (state.normalizedEvents?.at(-1)?.id ?? 0) + 1, name: 'die', stage: 'target',
-      subject: { kind: 'unit', unitId: unitId(unit) }, origin: deathHex,
+      subject: { kind: 'unit', unitId: unitId(unit) }, object: { kind: 'hex', coordinate: deathHex },
+      origin: deathHex, destination: deathHex,
       parameters: [], qualifiers: [], controller: unit.owner,
       turn: state.turnNumber ?? 0, success: true
     };
@@ -534,6 +535,12 @@ function resolveNormalizedTriggeredAction(state: GameState, unit: UnitState, eve
         enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'trigger-pull', distance: amount(action) ?? 0, range: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
       }
     }
+    else if (action.kind === 'defense' && action.range === 0 && event.controller === unit.owner) {
+      const value = amount(action) ?? 0;
+      if (action.type?.includes('magic')) addMagicModifier(unit, value);
+      else addShield(unit, value, unitId(unit));
+      performedAction = true;
+    }
     else if (action.kind === 'defense' && action.type?.includes('adjacent') && event.controller === unit.owner) {
       for (const coordinate of adjacentCoordinates(unit.coordinate)) {
         const ally = at(state, coordinate);
@@ -559,7 +566,7 @@ function cardActionFromNormalizedIntent(intent: NormalizedActionIntent): CardAct
   if (intent.name === 'move' || intent.name === 'fly') return { kind: intent.name, range: Number(left ?? 0), ...qualified };
   const kind = intent.name === 'bow' ? 'ranged'
     : intent.name === 'mend' ? 'heal'
-    : intent.name === 'mshield' ? 'defense'
+    : intent.name === 'shield' || intent.name === 'mshield' ? 'defense'
     : intent.name as CardAction['kind'];
   if (!['ranged', 'fire', 'stun', 'pull', 'push', 'defense', 'heal', 'damage', 'modifier', 'life', 'maxlife', 'revive'].includes(kind)) return undefined;
   return {
@@ -1141,7 +1148,7 @@ function normalizedIntent(before: GameState, player: Player, action: GameAction)
   const subject = acting ? { kind: 'unit' as const, unitId: unitId(acting) }
     : action.type === 'deploy' ? { kind: 'unit' as const, unitId: `${player}:${action.troopId}` as UnitId }
     : undefined;
-  const object = target && action.type !== 'deploy' ? { kind: 'hex' as const, coordinate: target } : undefined;
+  const object = target ? { kind: 'hex' as const, coordinate: target } : undefined;
   return {
     name: normalizedName(action), ...(subject ? { subject } : {}), ...(object ? { object } : {}),
     ...(origin ? { origin } : {}), ...(target ? { target } : {}), parameters: [], qualifiers: [], controller: player
@@ -1178,7 +1185,12 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
   if (action.type === 'deploy') {
     const sourceUnitId = `${player}:${action.troopId}` as UnitId;
     for (const [index, rule] of (cards.get(action.troopId)?.rules ?? []).entries()) {
-      rules.push({ id: `${action.troopId}:${cards.get(action.troopId)?.ruleIds?.[index] ?? `rule-${index + 1}`}`, sourceUnitId, rule });
+      rules.push({
+        id: `${action.troopId}:${cards.get(action.troopId)?.ruleIds?.[index] ?? `rule-${index + 1}`}`,
+        sourceUnitId,
+        sourceSnapshot: { id: sourceUnitId, troopId: action.troopId, owner: player, coordinate: action.coordinate, permanentDamage: 0 },
+        rule
+      });
     }
   }
   const flushStateRows = (): void => {
@@ -1210,8 +1222,13 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
     }
   };
   const result = executeNormalizedIntent(state, cards, rules, intent, {
-    mode: () => delayed ? 'deferred' : 'immediate',
+    mode: candidate => candidate === intent
+      ? delayed ? 'deferred' : 'immediate'
+      : ['bow', 'fire', 'cannon', 'gore-attack', 'bomb-explode'].includes(candidate.name) && !candidate.qualifiers.includes('fast') ? 'deferred' : 'immediate',
     apply: (_intent, _runtimeState, eventResolved) => {
+      if (_intent.causedByRuleId && _intent.triggeringEvent) {
+        return applyNormalizedTriggeredIntent(state, _intent, _intent.triggeringEvent, cards);
+      }
       applyAuthoritativeAction(state, player, action, cards, appliedState => {
         eventResolved?.(appliedState);
         flushStateRows();

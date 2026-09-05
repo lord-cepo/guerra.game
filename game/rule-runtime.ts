@@ -23,6 +23,8 @@ export interface NormalizedActionIntent {
   qualifiers: RulePhrase['action']['qualifiers'];
   controller: Player;
   causedByRuleId?: string;
+  /** Parent occurrence retained internally while a triggered action executes. */
+  triggeringEvent?: NormalizedEventRecord;
   mandatory?: true;
 }
 
@@ -122,6 +124,7 @@ function materializeEvent(
     origin: fixedCoordinate(subject, context.state, source, event), target: fixedCoordinate(object, context.state, source, event),
     parameters: [...phrase.action.parameters], qualifiers: [...phrase.action.qualifiers], controller: context.controller,
     causedByRuleId: source.id,
+    triggeringEvent: event,
     ...(phrase.mandatory ? { mandatory: true as const } : {})
   })) } };
 }

@@ -47,7 +47,7 @@ test('side-card summaries include card-level self defense capabilities', () => {
 });
 
 test('board trigger rows identify their magic modifier component', () => {
-  const deploy = boardDescriptionEntries(createTroopView('duelist-scorpion', 1)).find(line => line.text === 'Deploy [[enemy-dark:⬢]]: +3 ~+3~');
+  const deploy = boardDescriptionEntries(createTroopView('duelist-scorpion', 1)).find(line => line.text === 'Deploy [[enemy-dark:⬢]]: 3T🛡️0 & ~3T🛡️0~');
   assert.equal(deploy?.magicModifier, true);
   const physicalOnly = boardDescriptionEntries(createTroopView('thunder-toad', 1)).find(line => line.text === '🚫: +1');
   assert.equal(physicalOnly?.magicModifier, false);

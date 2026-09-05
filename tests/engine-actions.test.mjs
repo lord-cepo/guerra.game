@@ -92,6 +92,9 @@ test('authoritative actions record normalized target and resolved lifecycle stag
   assert.deepEqual(deployed.normalizedEvents.filter(event => event.name === 'deploy').map(event => [event.name, event.stage, event.success]), [
     ['deploy', 'target', true], ['deploy', 'resolved', true]
   ]);
+  assert.deepEqual(deployed.normalizedEvents.filter(event => event.name === 'deploy').map(event => event.object), [
+    { kind: 'hex', coordinate: '1,2' }, { kind: 'hex', coordinate: '1,2' }
+  ]);
   assert.equal(deployed.normalizedEvents[0].destination, '1,2');
   assert.equal(deployed.rulesVersion, 3);
 });

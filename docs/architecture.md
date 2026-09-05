@@ -248,6 +248,11 @@ capture-then-fire rule. Runtime rule sources retain a last-known unit snapshot,
 allowing death triggers to fire after their source has been removed from the
 board.
 
+State-change event bindings preserve entity roles: Deploy, Die, and Activate
+are binary, with a unit subject and a hex object at the same coordinate. Death
+records the last occupied hex before removal. Revive is unary because the
+chosen defeated unit is the event subject and has no board hex yet.
+
 ## Persistence
 
 Local state lives under `data/`:
