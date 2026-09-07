@@ -1,5 +1,7 @@
 import type { ActionQualifier, CardAction, PassiveKind, RegionType, TroopRole, TroopSeed } from './cards.js';
-import { parseRule } from './rule-parser.js';
+import { parseRule, parseRuleEffectBundle } from './rule-parser.js';
+import { ruleWord } from './rule-vocabulary.js';
+import { actionReach, radiusSelector, selectorReach } from './action-selector.js';
 
 export interface CardSource {
   id: string;
@@ -32,7 +34,28 @@ function actionName(token: string): { kind: CardAction['kind']; type?: CardActio
 }
 
 export function parseAction(text: string, context = 'action'): CardAction {
-  const functionMatch = text.trim().match(/^((?:[PFT]\.)*)([a-z][a-z-]*)\(([^)]*)\)$/);
+  const { range, ...action } = parseActionBody(text, context);
+  return { ...action, selector: action.selector ?? radiusSelector(range ?? 0) };
+}
+
+function parseActionBody(text: string, context: string): CardAction {
+  text = text.trim().replace(/\([^()]*\)/g, part => part.replace(/\s+/g, ''));
+  if (text.includes('::') || text.includes(' & ') || /^(?:[PFTA]\.)*[a-z-]+(?:\([^)]*\))?\s+/.test(text) && !/^(move|fly) \d+$/.test(text)) {
+    const bundle = parseRuleEffectBundle(text, context);
+    if (bundle.consequences[0].kind !== 'event') throw new Error(`${context}: a printed action needs a targetable first action`);
+    const phrase = bundle.consequences[0].event;
+    const parameters = [...phrase.action.parameters];
+    if (phrase.object) {
+      const count = ruleWord(phrase.action.name)?.userParameters;
+      const range = selectorReach(phrase.object);
+      if (count && parameters.length < count) parameters.push(range);
+      else if (count) parameters[count - 1] = range;
+    }
+    const qualifier = phrase.action.qualifiers.map(value => value === 'tireless' ? 'T.' : value === 'pierce' ? 'P.' : value === 'action-free' ? 'A.' : 'F.').join('');
+    const name = phrase.action.name === 'bomb-throw' ? 'bomb' : phrase.action.name;
+    return { ...parseAction(`${qualifier}${name}(${parameters.join(',')})`, context), costs: bundle.costs, effect: phrase, ...(phrase.object ? { selector: phrase.object } : {}), ...(bundle.consequences.length > 1 ? { followups: bundle.consequences.slice(1) } : {}) };
+  }
+  const functionMatch = text.trim().match(/^((?:[PFTA]\.)*)([a-z][a-z-]*)\(([^)]*)\)$/);
   if (functionMatch) {
     const qualifierPrefix = functionMatch[1];
     const name = functionMatch[2];
@@ -40,7 +63,7 @@ export function parseAction(text: string, context = 'action'): CardAction {
       ? functionMatch[3].split(',').map(token => number(token.trim(), context))
       : [];
     const type: ActionQualifier[] = qualifierPrefix.split('.').filter(Boolean).map(part =>
-      part === 'P' ? 'pierce' : part === 'F' ? 'instant' : 'tireless');
+      part === 'P' ? 'pierce' : part === 'F' ? 'instant' : part === 'A' ? 'action-free' : 'tireless');
     if (name === 'move' || name === 'fly') {
       if (parameters.length !== 1) throw new Error(`${context}: ${name} needs exactly one parameter`);
       return { kind: name, range: parameters[0], ...(type.length ? { type } : {}) };
@@ -97,18 +120,21 @@ export function parseActions(text: string | undefined, context = 'actions', impl
   if (depth !== 0) throw new Error(`${context}: unmatched opening parenthesis`);
   phrases.push(source.slice(start));
   const explicit = phrases.map(value => value.trim()).filter(Boolean).map(value => parseAction(value, context));
-  if (implicitMove && !explicit.some(action => action.kind === 'move' || action.kind === 'fly')) explicit.unshift({ kind: 'move', range: 1 });
-  return explicit.filter(action => action.kind !== 'move' || action.range > 0);
+  if (implicitMove && !explicit.some(action => action.kind === 'move' || action.kind === 'fly')) explicit.unshift({ kind: 'move', selector: radiusSelector(1) });
+  return explicit.filter(action => action.kind !== 'move' || actionReach(action) > 0);
 }
 
 export function parseCard(source: CardSource): TroopSeed {
   const title = source.name ?? source.id.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
   try {
     const regions = source.deploymentRegions.split(/\s+/).filter(region => region !== 'enemy') as RegionType[];
-    const parsedActions = parseActions(source.actions, `${source.id} actions`, (source.role ?? 'troop') !== 'temple');
-    const rules = source.rules?.map((rule, index) => parseRule(rule, `${source.id} rule ${index + 1}`));
-    const selfDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && !action.type?.includes('magic'));
-    const selfMagicDefense = parsedActions.find(action => action.kind === 'defense' && action.range === 0 && action.type?.includes('magic'));
+    const isRule = (text: string): boolean => /\s:\s|\swhile\s|\shave\s|^while\s/.test(text);
+    const ruleSources = source.rules?.filter(isRule);
+    const actionSources = [source.actions, ...(source.rules?.filter(text => !isRule(text)) ?? [])].filter(Boolean).join(', ');
+    const parsedActions = parseActions(actionSources, `${source.id} actions`, (source.role ?? 'troop') !== 'temple');
+    const rules = ruleSources?.map((rule, index) => parseRule(rule, `${source.id} rule ${index + 1}`));
+    const selfDefense = parsedActions.find(action => action.kind === 'defense' && actionReach(action) === 0 && !action.type?.includes('magic'));
+    const selfMagicDefense = parsedActions.find(action => action.kind === 'defense' && actionReach(action) === 0 && action.type?.includes('magic'));
     const actions = parsedActions.filter(action => action !== selfDefense && action !== selfMagicDefense);
     return {
       id: source.id, name: title, role: source.role ?? 'troop', baseHealth: source.baseHealth,
@@ -117,7 +143,7 @@ export function parseCard(source: CardSource): TroopSeed {
       ...(source.passives ? { passives: source.passives.split(/\s+/) as PassiveKind[] } : {}),
       ...(selfDefense ? { selfDefense: Number(selfDefense.amount ?? 0) } : {}),
       ...(selfMagicDefense ? { selfMagicDefense: Number(selfMagicDefense.amount ?? 0) } : {}),
-      ...(rules ? { rules, ruleSources: [...(source.rules ?? [])], ruleIds: [...(source.ruleIds ?? [])] } : {})
+      ...(rules ? { rules, ruleSources: [...(ruleSources ?? [])], ruleIds: [...(source.ruleIds ?? [])] } : {})
     };
   } catch (cause) {
     const parserMessage = cause instanceof Error ? cause.message : String(cause);

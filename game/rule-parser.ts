@@ -1,4 +1,7 @@
-import { ambiguousRuleWords, canonicalRuleWord, ruleWord } from './rule-vocabulary.js';
+import { ambiguousRuleWords, attackFamilies, canonicalRuleWord, ruleWord } from './rule-vocabulary.js';
+import { parseNamedValue, type NamedValue } from './named-values.js';
+
+const compactParameters = (text: string): string => text.replace(/(?<=[a-z])\([^()]*\)/g, part => part.replace(/\s+/g, ''));
 
 /** A parsed descriptor denotes a set of board hexes. */
 export type RuleSelector = 'any' | 'all' | 'none';
@@ -60,6 +63,7 @@ export interface RuleFieldQuery {
 }
 
 export interface RuleDirectedSelection {
+  within?: boolean;
   kind: 'directed';
   direction: 'away-from' | 'towards' | 'parallel-to' | 'range-from';
   distance?: number;
@@ -69,19 +73,25 @@ export interface RuleDirectedSelection {
 }
 
 /** A reference or descriptor resolves to a board hex, never a unit/hex tuple. */
-export type RuleHex = RuleDescriptor | RuleBoundReference | RuleFieldQuery | RuleDirectedSelection | RuleWildcard;
+export type RuleHex = RuleDescriptor | RuleBoundReference | RuleFieldQuery | RuleDirectedSelection | RuleWildcard
+  | { kind: 'complement'; operand: RuleHex }
+  | { kind: 'intersection'; operands: RuleHex[] }
+  | { kind: 'named'; scope: 'hex' | 'unit'; named: NamedValue };
 /** Compatibility name for the phrase grammar's hex operand. */
-export type RuleEntity = RuleHex;
+export type RuleEntity = RuleHex | { kind: 'player'; player: 'you' | 'opp' };
 
 export type RulePhase = 'start' | 'action' | 'action-resolve' | 'combat-resolve' | 'end' | 'opponent-start' | 'opponent-end';
 export type RuleEndpoint = 'origin' | 'destination';
 
 export interface RulePhaseCondition {
+  next?: boolean;
   kind: 'phase';
   phase: RulePhase;
 }
 
 export interface RulePhrase {
+  /** Internal expansion marker; explicit bundle costs replace implicit costs. */
+  costsPaid?: boolean;
   kind: 'relation';
   subject: RuleEntity;
   action: PackedRuleAction;
@@ -98,9 +108,10 @@ export interface RulePhrase {
 export type RuleRelationCondition = RulePhrase;
 export type RuleCondition = RulePhaseCondition | RulePhrase;
 
-export type PackedActionQualifier = 'pierce' | 'fast' | 'tireless';
+export type PackedActionQualifier = 'pierce' | 'fast' | 'tireless' | 'action-free';
 
 export interface PackedRuleAction {
+  named?: NamedValue;
   name: string;
   /** Packed one-character parameters; `x` becomes undefined. */
   parameters: Array<number | undefined>;
@@ -111,6 +122,7 @@ export interface PackedRuleAction {
 export type RuleEffect = RulePhrase;
 
 export interface RuleStateProperty {
+  named?: NamedValue;
   name: string;
   parameters: Array<number | undefined | 'tireless' | 'pierce' | 'fast'>;
   action?: string;
@@ -136,26 +148,36 @@ export interface RuleBooleanCondition {
   conditions: RuleObservableCondition[];
 }
 
-export type RuleObservableCondition = RuleState | RuleHistoricalCondition | RuleBooleanCondition;
+export interface RuleSelectorCondition {
+  kind: 'selector-condition';
+  quantifier: RuleSelector;
+  selector: RuleSetSelector;
+}
+
+export type RuleObservableCondition = RuleState | RuleHistoricalCondition | RuleBooleanCondition | RuleSelectorCondition;
 
 export type RuleLifetime =
   | { kind: 'permanent' }
   | { kind: 'until'; event: RuleCondition }
   | { kind: 'removed-after'; event: RuleCondition };
 
-export type RuleTriggeredConsequence =
+export type RuleTiming = 'next-start' | 'next-end' | 'next-opponent-start' | 'next-opponent-end';
+export type RuleTriggeredConsequence = { at?: RuleTiming } & (
   | { kind: 'event'; event: RulePhrase }
   | { kind: 'stored-state'; state: RuleState; lifetime: RuleLifetime }
-  | { kind: 'distributed-state'; selector: RuleSetSelector; state: RuleState; lifetime: RuleLifetime };
+  | { kind: 'distributed-state'; selector: RuleSetSelector; state: RuleState; lifetime: RuleLifetime });
 
 export interface ParsedTriggerRule {
   kind: 'trigger';
   anchor: RuleCondition;
   guard?: RuleObservableCondition;
   consequences: RuleTriggeredConsequence[];
+  /** Explicit payment replaces the implicit action costs. */
+  costs?: RulePhrase[];
 }
 
 export interface ParsedContinuousRule {
+  distribution?: ParsedHaveRule;
   kind: 'continuous';
   contribution: RuleState;
   condition: RuleObservableCondition;
@@ -281,9 +303,7 @@ function parseFieldQuery(words: readonly string[], start: number, context: strin
     const negated = match[1] === '!';
     const key = match[2] as typeof queryFieldOrder[number];
     const value = match[3];
-    if (negated && (key !== 'o' || (value !== 'you' && value !== 'opp'))) {
-      throw new Error(`${context}: only o:you and o:opp currently support query negation`);
-    }
+    if (negated && (key !== 'o' || (value !== 'you' && value !== 'opp'))) break;
     if (fields[key]) throw new Error(`${context}: duplicate ${key}: query field`);
     if (!queryFieldValues[key].has(value)) throw new Error(`${context}: invalid ${key}: value "${value}"`);
     fields[key] = value;
@@ -309,8 +329,44 @@ function parseFieldQuery(words: readonly string[], start: number, context: strin
 }
 
 function parseSubsetWords(words: readonly string[], start: number, context: string): { entity: RuleEntity; next: number } {
+  const parts: RuleHex[] = [];
+  let next = start;
+  do {
+    const word = words[next];
+    if (word?.startsWith('!') && !word.startsWith('!o:')) {
+      const offset = word === '!' ? next + 1 : next;
+      const input = [...words];
+      if (word !== '!') input[next] = word.slice(1);
+      const parsed = parseSubsetAtom(input, offset, context);
+      if (parsed.entity.kind === 'player') throw new Error(`${context}: complements use the board universe`);
+      parts.push({ kind: 'complement', operand: parsed.entity }); next = parsed.next;
+    } else {
+      const parsed = parseSubsetAtom(words, next, context);
+      if (parsed.entity.kind === 'player') return parsed;
+      parts.push(parsed.entity); next = parsed.next;
+    }
+  } while (next < words.length && /^(?:!|[oprcst]:|(?:hex|unit)-(?:flag|counter)\()/.test(words[next]));
+  return { entity: parts.length === 1 ? parts[0] : { kind: 'intersection', operands: parts }, next };
+}
+
+function parseSubsetAtom(words: readonly string[], start: number, context: string): { entity: RuleEntity; next: number } {
   const token = words[start];
   if (!token) throw new Error(`${context}: missing subset`);
+  if (token.startsWith('(')) {
+    let depth = 0; let end = start;
+    for (; end < words.length; end++) {
+      depth += [...words[end]].filter(char => char === '(').length - [...words[end]].filter(char => char === ')').length;
+      if (depth === 0) break;
+    }
+    if (depth !== 0) throw new Error(`${context}: unmatched selector parenthesis`);
+    const inner = words.slice(start, end + 1).join(' ').slice(1, -1).split(/\s+/);
+    const parsed = parseSubsetWords(inner, 0, context);
+    if (parsed.next !== inner.length) throw new Error(`${context}: invalid grouped selector`);
+    return { entity: parsed.entity, next: end + 1 };
+  }
+  if (token === 'you' || token === 'opp') return { entity: { kind: 'player', player: token }, next: start + 1 };
+  const named = token.match(/^(hex|unit)-(flag|counter)\((.*)\)$/);
+  if (named) return { entity: { kind: 'named', scope: named[1] as 'hex' | 'unit', named: parseNamedValue(`${named[1]}-${named[2]}`, named[3])! }, next: start + 1 };
   if (token === '_') return { entity: { kind: 'wildcard' }, next: start + 1 };
   const leadingQuery = parseFieldQuery(words, start, context);
   if (leadingQuery) {
@@ -364,6 +420,7 @@ export function parsePackedRuleAction(text: string, context = 'rule action'): Pa
     if (qualifier === 'P') return 'pierce';
     if (qualifier === 'F') return 'fast';
     if (qualifier === 'T') return 'tireless';
+    if (qualifier === 'A') return 'action-free';
     throw new Error(`${context}: unknown qualifier "${qualifier}"`);
   });
   const match = body.match(/^([a-z][a-z-]*?)([0-9xX]{0,3})$/);
@@ -377,19 +434,21 @@ export function parsePackedRuleAction(text: string, context = 'rule action'): Pa
 }
 
 function parseRuleActionToken(text: string, context: string): PackedRuleAction {
-  const functionMatch = text.match(/^((?:[PFT]\.)*)([a-z][a-z-]*)(?:\.([a-z][a-z-]*))?\(([^)]*)\)$/);
+  const functionMatch = text.match(/^((?:[PFTA]\.)*)([a-z][a-z-]*)(?:\.([a-z][a-z-]*))?\(([^)]*)\)$/);
   if (!functionMatch) return parsePackedRuleAction(text, context);
   const qualifiers = functionMatch[1].split('.').filter(Boolean).map<PackedActionQualifier>(qualifier =>
-    qualifier === 'P' ? 'pierce' : qualifier === 'F' ? 'fast' : 'tireless');
+    qualifier === 'P' ? 'pierce' : qualifier === 'F' ? 'fast' : qualifier === 'A' ? 'action-free' : 'tireless');
   const rawName = functionMatch[2];
   const action = functionMatch[3];
+  const named = parseNamedValue(rawName, functionMatch[4]);
+  if (named) return { name: rawName, named, parameters: [], qualifiers };
   const parameters = functionMatch[4].trim() ? functionMatch[4].split(',').map(value => {
     const token = value.trim();
     if (token === '_' || token.toLowerCase() === 'x' || token.toLowerCase() === 'u') return undefined;
     if (!/^-?\d+$/.test(token)) throw new Error(`${context}: invalid parameter "${token}"`);
     return Number(token);
   }) : [];
-  return { name: action ? `${rawName}.${action}` : canonicalRuleWord(rawName), parameters, qualifiers };
+  return { name: action ? `${rawName}.${action}` : rawName === 'bomb' ? 'bomb-throw' : canonicalRuleWord(rawName), parameters, qualifiers };
 }
 
 function validateRuleAction(action: PackedRuleAction, context: string): void {
@@ -399,7 +458,7 @@ function validateRuleAction(action: PackedRuleAction, context: string): void {
     throw new Error(`${context}: only move, fly, and gore support -from/-to`);
   }
   const definition = ruleWord(verb);
-  if (definition?.kind !== 'verb') {
+  if (definition?.kind !== 'verb' && !(verb.startsWith('up-') && definition?.contributable)) {
     const ambiguity = ambiguousRuleWords[verb];
     throw new Error(ambiguity ? `${context}: ambiguous verb "${verb}": ${ambiguity}` : `${context}: unknown verb "${action.name}"`);
   }
@@ -422,7 +481,7 @@ function validateRuleAction(action: PackedRuleAction, context: string): void {
 }
 
 function parseRulePhrase(text: string, context: string, consequence: boolean, allowBooleanQuantifiers = false): RulePhrase {
-  const source = text.trim();
+  const source = compactParameters(text).trim();
   const words = source ? source.split(/\s+/) : [];
   if (!words.length) throw new Error(`${context}: expected "[subject] action [object]"`);
   const mustIndexes = words.flatMap((word, index) => word === 'must' ? [index] : []);
@@ -440,7 +499,8 @@ function parseRulePhrase(text: string, context: string, consequence: boolean, al
       const parsed = parseRuleActionToken(words[candidate], `${context} action`);
       const resolved = parsed.name.match(/^([a-z][a-z-]*)-resolved$/);
       const movement = parsed.name.match(/^(move|fly|gore)-(from|to)$/);
-      if (ruleWord(movement?.[1] ?? resolved?.[1] ?? parsed.name)?.kind === 'verb') {
+      const definition = ruleWord(movement?.[1] ?? resolved?.[1] ?? parsed.name);
+      if (definition?.kind === 'verb' || parsed.name.startsWith('up-') && definition?.contributable) {
         actionIndex = candidate; rawAction = parsed; break;
       }
     } catch { /* entity/query word, not the verb */ }
@@ -476,10 +536,16 @@ function parseRulePhrase(text: string, context: string, consequence: boolean, al
     throw new Error(`${context}: event operands cannot start with Boolean any or none; use _ for an unconstrained operand`);
   }
   if (words[objectStart]) {
-    const parsedObject = parseSubsetWords(words, objectStart, `${context} object`);
+    const parsedObject = verb === 'up-actions' && ['you', 'opp'].includes(words[objectStart])
+      ? { entity: { kind: 'player' as const, player: words[objectStart] as 'you' | 'opp' }, next: objectStart + 1 }
+      : parseSubsetWords(words, objectStart, `${context} object`);
     if (parsedObject.next !== words.length) throw new Error(`${context}: invalid object after "${words[actionIndex]}"`);
     object = parsedObject.entity;
   }
+  if ((verb === 'up-actions' || verb.startsWith('up-player-')) && (object?.kind !== 'player' || targetPolicy)) throw new Error(`${context}: ${verb} requires exactly one player target: you or opp`);
+  if (/^up-(hex|unit)-(counter|flag)$/.test(verb) && (!object || object.kind === 'player')) throw new Error(`${context}: ${verb} requires a board target`);
+  if (consequence && /^up-(hex|unit|player)-(counter|flag)$/.test(verb) && !action.named) throw new Error(`${context}: ${verb} requires a name and value`);
+  if (consequence && attackFamilies[verb]) throw new Error(`${context}: ${verb} is an event family, not an executable action`);
   if (noObjectVerbs.has(verb) && object) {
     throw new Error(`${context}: unary verb "${verb}" cannot have an object`);
   }
@@ -498,7 +564,7 @@ function parseRulePhrase(text: string, context: string, consequence: boolean, al
     const definition = ruleWord(verb);
     const parameterCount = definition?.userParameters;
     if (parameterCount !== undefined) {
-      const explicitTargetCount = Math.max(0, parameterCount - 1);
+      const explicitTargetCount = verb === 'up-actions' ? parameterCount : Math.max(0, parameterCount - 1);
       const valid = object
         ? action.parameters.length === explicitTargetCount || action.parameters.length === parameterCount
         : action.parameters.length === parameterCount;
@@ -521,6 +587,7 @@ function parseRulePhrase(text: string, context: string, consequence: boolean, al
 
 export function parseRuleCondition(text: string, context = 'rule condition'): RuleCondition {
   const source = text.trim();
+  if (/^next-(opponent-)?(start|end)$/.test(source)) return { kind: 'phase', phase: source.slice(5) as RulePhase, next: true };
   if (phases.has(source as RulePhase)) return { kind: 'phase', phase: source as RulePhase };
   return parseRulePhrase(source, context, false);
 }
@@ -537,6 +604,8 @@ function parseStateProperty(text: string, context: string): RuleStateProperty {
   const match = text.match(/^([a-z][a-z-]*)\(([^)]*)\)$/);
   const rawName = match?.[1] ?? text;
   const name = canonicalRuleWord(rawName);
+  const named = parseNamedValue(name, match?.[2] ?? '');
+  if (named && !name.startsWith('up-')) return { name, named, parameters: [] };
   const rawParameters = match?.[2].trim() ? match[2].split(',').map(value => value.trim()) : [];
   const upgradeAction = name.startsWith('up-') && name !== 'up-mod' && name !== 'up-life' ? name.slice(3) : undefined;
   const definition = upgradeAction ? ruleWord('up-action') : ruleWord(name);
@@ -576,7 +645,7 @@ function parseStateProperty(text: string, context: string): RuleStateProperty {
 }
 
 export function parseRuleState(text: string, context = 'rule state'): RuleState {
-  const words = text.trim().split(/\s+/).filter(Boolean);
+  const words = compactParameters(text).trim().split(/\s+/).filter(Boolean);
   if (!words.length) throw new Error(`${context}: expected "[subject] property [object]"`);
   const misplacedNone = words.findIndex((word, index) => index > 0 && (word === 'none' || word.startsWith('none-')));
   if (misplacedNone >= 0) throw new Error(`${context}: pronoun none is valid only at the beginning of a phrase`);
@@ -671,6 +740,11 @@ export function parseObservableCondition(text: string, context = 'rule condition
     if (phraseHasSelector(event, 'all')) throw new Error(`${context}: all is invalid in a historical condition`);
     return { kind: 'history', event, interval: intervalMatch[1] as RuleHistoryInterval };
   }
+  const quantified = source.match(/^(any|none|all)\s+(.+)$/);
+  if (quantified) {
+    return { kind: 'selector-condition', quantifier: quantified[1] as RuleSelector,
+      selector: parseSetSelector(stripOuterGrouping(quantified[2]), context) };
+  }
   const state = parseRuleState(source, context);
   const definition = ruleWord(state.property.name);
   if (!definition?.observable) throw new Error(`${context}: property "${state.property.name}" is not observable`);
@@ -679,6 +753,8 @@ export function parseObservableCondition(text: string, context = 'rule condition
 
 function entityHasSelector(entity: RuleEntity | undefined, selector: RuleSelector): boolean {
   if (!entity) return false;
+  if (entity.kind === 'complement') return entityHasSelector(entity.operand, selector);
+  if (entity.kind === 'intersection') return entity.operands.some(operand => entityHasSelector(operand, selector));
   if (entity.kind === 'descriptor' || entity.kind === 'query') return entity.selector === selector;
   if (entity.kind === 'directed') return entityHasSelector(entity.reference, selector);
   return false;
@@ -712,6 +788,8 @@ function parseLifetime(text: string, context: string): { stateText: string; life
 }
 
 function parseTriggeredConsequence(text: string, context: string): RuleTriggeredConsequence {
+  const timing = text.match(/\s+at\s+(next-(?:opponent-)?(?:start|end))(?=\s|$)/);
+  if (timing) return { ...parseTriggeredConsequence(text.replace(timing[0], ''), context), at: timing[1] as RuleTiming };
   const lifetime = parseLifetime(text, context);
   if (lifetime) {
     if (lifetime.stateText.includes(' have ')) {
@@ -783,6 +861,7 @@ function validateConsequenceBindings(rule: ParsedTriggerRule, context: string): 
       if (!available.has(reference)) throw new Error(`${context}: ${reference} is not bound by this trigger anchor`);
     }
   };
+  for (const cost of rule.costs ?? []) requireAvailable(eventReferencesInCondition(cost));
   for (const consequence of rule.consequences) {
     if (consequence.kind === 'event') {
       requireAvailable(eventReferencesInCondition(consequence.event));
@@ -834,6 +913,17 @@ export function parseRule(text: string, context = 'rule'): ParsedRule {
   const source = text.trim();
   const separator = ruleSeparator(source);
   const whileIndex = source.indexOf(' while ');
+  if (source.startsWith('while ') && separator >= 0) {
+    const right = source.slice(separator + 3).trim();
+    const shorthand = right.match(/^(up-[a-z-]+\([^)]*\))\s+(.+)$/);
+    const distribution = right.includes(' have ') ? parseHaveRule(right, context)
+      : shorthand ? parseHaveRule(`${shorthand[2]} have ${shorthand[1]}`, context) : undefined;
+    let terminal = distribution?.attachment;
+    while (terminal?.kind === 'have') terminal = terminal.attachment;
+    const contribution = terminal ?? parseRuleState(right, context);
+    validateContribution(contribution, context);
+    return { kind: 'continuous', contribution, ...(distribution ? { distribution } : {}), condition: parseObservableCondition(source.slice(6, separator), context) };
+  }
   if (separator < 0 && source.includes(' have ')) return parseHaveRule(source, context);
   if (separator < 0 && whileIndex >= 0) {
     const contribution = parseRuleState(source.slice(0, whileIndex), `${context} contribution`);
@@ -857,11 +947,29 @@ export function parseRule(text: string, context = 'rule'): ParsedRule {
   if (anchor.kind === 'relation' && (phraseHasSelector(anchor, 'none') || phraseHasSelector(anchor, 'all'))) {
     throw new Error(`${context}: all/none quantified events are conditions, not concrete anchors`);
   }
+  const effect = parseRuleEffectBundle(right, context);
   const rule: ParsedTriggerRule = {
     kind: 'trigger', anchor,
     ...(guardText ? { guard: parseObservableCondition(guardText, `${context} guard`) } : {}),
-    consequences: splitConjunction(right).map((effect, index) => parseTriggeredConsequence(effect, `${context} consequence ${index + 1}`))
+    ...effect
   };
   validateConsequenceBindings(rule, context);
   return rule;
+}
+
+/** Costs and consequences are separate ordered bundles. */
+export function parseRuleEffectBundle(text: string, context = 'effect'): { costs?: RulePhrase[]; consequences: RuleTriggeredConsequence[] } {
+  const parts = text.split(/\s*::\s*/);
+  if (parts.length > 2 || parts.some(part => !part.trim())) throw new Error(`${context}: expected costs :: effects`);
+  const costs = parts.length === 2 ? splitConjunction(parts[0]).map(part => {
+    const cost = parseRulePhrase(part, `${context} cost`, true);
+    if (!['deactivate', 'up-actions'].includes(cost.action.name) || cost.mandatory || cost.targetPolicy) throw new Error(`${context}: a cost must be deactivate or up-actions`);
+    if (cost.action.name === 'up-actions' && !(Number(cost.action.parameters[0]) < 0)) throw new Error(`${context}: an action-token cost must be negative`);
+    if (cost.action.name === 'deactivate' && (cost.object?.kind !== 'reference' || cost.subject.kind !== 'reference')) throw new Error(`${context}: deactivation costs require singular references`);
+    return cost;
+  }) : undefined;
+  return {
+    ...(costs ? { costs } : {}),
+    consequences: splitConjunction(parts.at(-1)!).map((part, index) => parseTriggeredConsequence(part, `${context} consequence ${index + 1}`))
+  };
 }

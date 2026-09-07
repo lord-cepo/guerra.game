@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+/.pnpm-store/
 
 # TypeScript/build output
 dist/
@@ -10,6 +11,12 @@ game/*.js
 
 # Tests
 coverage/
+
+# Local test reports and investigation snapshots
+/.rule-*
+/.syntax-*
+/.repair-*.txt
+/.current-test-results.txt
 
 # Environment variables and secrets
 .env
@@ -31,5 +38,5 @@ Thumbs.db
 
 # images
 assets/high_resolution
-assets/cars/high_resolution
+assets/cards/high_resolution/
 docs/my_rules.md

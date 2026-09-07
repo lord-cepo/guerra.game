@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isBoardCoordinate } from '../dist/game/board.js';
-import { applyGameAction, availableActionsFor, combatSummary, controlSummary, createGameState, effectiveMaximumHealth, effectivePassivesFor, effectiveTroopActions, isUnitInactive, unitId } from '../dist/game/engine.js';
+import { applyGameAction, availableActionsFor, combatSummary, controlSummary, createGameState, effectiveMaximumHealth, effectivePassivesFor, effectiveRuleSources, effectiveTroopActions, isUnitInactive, unitId } from '../dist/game/engine.js';
 
 const diagnosticSnapshotLimit = 100;
 
@@ -44,7 +44,7 @@ export class MatchStore {
       deckChoices: { 1: undefined, 2: undefined },
       selections: { 1: undefined, 2: undefined },
       targetSelections: { 1: undefined, 2: undefined },
-      game: createGameState({ 1: deckOne, 2: deckTwo }),
+      game: createGameState({ 1: deckOne, 2: deckTwo }, this.cardsById),
       diagnostics: { createdAt: new Date().toISOString(), snapshots: [] }
     };
     this.matches.set(id, match);
@@ -104,6 +104,13 @@ export class MatchStore {
       lastActingTroopId: structuredClone(state.lastActingTroopId ?? {}),
       turnCounts: structuredClone(state.turnCounts ?? {}),
       turnNumber: state.turnNumber ?? 0,
+      actions: structuredClone(state.actions),
+      offboardInactive: structuredClone(state.offboardInactive),
+      namedValues: structuredClone(state.namedValues),
+      scheduledRules: structuredClone(state.scheduledRules),
+      ruleWork: structuredClone(state.ruleWork),
+      paidCommand: structuredClone(state.paidCommand),
+      turnCommand: structuredClone(state.turnCommand),
       defeatedTroopIds: [...(state.defeatedTroopIds ?? [])], revision: state.revision ?? 0,
       rulesVersion: 3,
       normalizedEvents: structuredClone(state.normalizedEvents ?? []),
@@ -224,23 +231,34 @@ export class MatchStore {
         const id = unitId(unit);
         const bash = match.game.bashes.find(item => item.attackerId === id || item.defenderId === id);
         const combat = combatSummary(match.game, id, this.cardsById, bash?.target);
-        return { ...unit, id, currentHealth: combat.health, maxHealth: effectiveMaximumHealth(match.game, unit, this.cardsById), inactive: isUnitInactive(match.game, unit), combat, effectiveActions: effectiveTroopActions(match.game, unit, this.cardsById), effectivePassives: effectivePassivesFor(match.game, unit, this.cardsById) };
+        return { ...unit, id, currentHealth: combat.health, maxHealth: effectiveMaximumHealth(match.game, unit, this.cardsById), inactive: isUnitInactive(match.game, unit), combat, ruleSources: effectiveRuleSources(match.game, unit, this.cardsById), effectiveActions: effectiveTroopActions(match.game, unit, this.cardsById), effectivePassives: effectivePassivesFor(match.game, unit, this.cardsById) };
       }),
       defeatedTroopIds: [...(match.game.defeatedTroopIds ?? [])],
       effects: structuredClone(match.game.effects),
       bashes: structuredClone(match.game.bashes),
       bombs: structuredClone(match.game.bombs ?? []),
       pendingResolution: structuredClone(match.game.pendingResolution),
+      pendingResolutionQueue: structuredClone(match.game.pendingResolutionQueue),
       dashboard: structuredClone(match.game.dashboard ?? []),
       resolutionStack: [...(match.game.resolutionStack ?? [])],
       currentEventId: match.game.currentEventId,
       lastActingTroopId: { ...(match.game.lastActingTroopId ?? {}) },
       turnCounts: { ...(match.game.turnCounts ?? {}) },
       turnNumber: match.game.turnNumber ?? 0,
+      actions: structuredClone(match.game.actions ?? { [match.game.activePlayer]: 1 }),
+      offboardInactive: structuredClone(match.game.offboardInactive),
+      namedValues: structuredClone(match.game.namedValues),
+      scheduledRules: structuredClone(match.game.scheduledRules),
+      ruleWork: structuredClone(match.game.ruleWork),
+      paidCommand: structuredClone(match.game.paidCommand),
+      turnCommand: structuredClone(match.game.turnCommand),
       winner: match.game.winner,
       control: controlSummary(match.game, this.cardsById),
       events: structuredClone(match.game.events?.slice(-100) ?? []),
-      presentationEvents: structuredClone(match.game.normalizedEvents?.slice(-100) ?? [])
+      presentationEvents: structuredClone(match.game.normalizedEvents?.slice(-100) ?? []),
+      normalizedEvents: structuredClone(match.game.normalizedEvents ?? []),
+      ruleContributions: structuredClone(match.game.ruleContributions ?? []),
+      nextRuleContributionId: match.game.nextRuleContributionId
     };
   }
 
@@ -253,6 +271,9 @@ export class MatchStore {
     const { match, player } = this.#matchAndPlayer(matchId, nickname);
     if (match.decks[player].length !== match.format) throw new Error(`Choose a completed ${match.format}-card deck first.`);
     match.ready[player] = true;
+    if (match.ready[1] && match.ready[2] && !match.game.normalizedEvents?.some(event => event.name === 'up-actions')) {
+      match.game = createGameState({ 1: match.decks[1], 2: match.decks[2] }, this.cardsById);
+    }
     return this.recordDiagnostic(match, { kind: 'ready', player, nickname });
   }
 
@@ -261,6 +282,8 @@ export class MatchStore {
     if (match.ready[player]) throw new Error('Your deck is already locked in.');
     if (!Array.isArray(deck) || deck.length !== match.format) throw new Error(`Choose a completed ${match.format}-card deck.`);
     match.decks[player] = [...deck];
+    match.game.deckOrder ??= {};
+    match.game.deckOrder[player] = [...deck];
     match.deckChoices[player] = deckIndex;
     return this.recordDiagnostic(match, { kind: 'deck-selected', player, nickname, deckIndex });
   }
@@ -340,7 +363,7 @@ export class MatchStore {
       && !match.game.defeatedTroopIds?.includes(`${nextPlayer}:${troopId}`)
       && !(match.game.units.find(unit => unit.owner === nextPlayer && unit.troopId === troopId)?.stunnedTurns ?? 0)
     );
-    if (hasNonStunnedCard && !hasAvailableCard) match.game.winner = nextPlayer === 1 ? 2 : 1;
+    if (nextPlayer !== player && !match.game.pendingResolution && hasNonStunnedCard && !hasAvailableCard) match.game.winner = nextPlayer === 1 ? 2 : 1;
     // A completed action is no longer a selection. The acting troop is shown
     // by its authoritative unavailable/grey state instead.
     match.selections[player] = undefined;

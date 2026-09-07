@@ -30,11 +30,12 @@ interface ActionBarOptions {
 }
 
 const labels: Record<GameActionType, string> = {
+  'resolve-rule': 'Choose effect target',
   deploy: 'Deploy', move: '🥾 Move', fly: '🪽 Fly', attack: '🏹 Ranged', cannon: '🧨 Cannon', gore: '🐏 Gore', bomb: '💣 Bomb',
   push: `${pushIcon} Push`, pull: `${pullIcon} Pull`, stun: `${stunIcon} Stun`, defense: '🛡️ Defense', 'magic-defense': '🛡️M Magic Defense',
   'self-defense': '🛡️ Self Defense', 'self-magic-defense': '🛡️M Self Magic Defense', magic: '🔥 Fire Magic', mending: '❤️ Mending', upgrade: '🔮 Upgrade', pass: 'Pass',
   'resolve-move': '🥾 End move', 'resolve-death-attack': '💀 Death attack', 'resolve-instant-ranged': 'F🏹 Instant ranged',
-  'resolve-instant-magic': 'F🔥 Instant magic', 'resolve-stun': `${stunIcon} End stun`, 'resolve-pull': `${pullIcon} Resolve pull`, 'resolve-revive': '👼 Revive', 'resolve-pass': 'Skip triggered action',
+  'resolve-instant-magic': 'F🔥 Instant magic', 'resolve-stun': `${stunIcon} End stun`, 'resolve-pull': `${pullIcon} Resolve pull`, 'resolve-revive': 'Revive', 'resolve-pass': 'Skip triggered action',
 };
 
 export function actionLabel(type: GameActionType): string { return labels[type]; }
@@ -73,8 +74,17 @@ export function createMatchActionBar(options: ActionBarOptions): (match: ServerM
     const selectedId = options.selectedTroopId(); const unit = options.selectedUnit();
     if (!selectedId || (match.pendingResolution?.owner ?? match.activePlayer) !== local || match.winner) return;
     const legal = options.legalActions();
-    if (match.pendingResolution?.kind === 'revive') {
-      for (const choice of legal.filter(action => action.type === 'resolve-revive')) { if (!choice.targetTroopId) continue; const button = document.createElement('button'); button.type = 'button'; button.textContent = `👼 ${catalogueById.get(choice.targetTroopId)?.name ?? choice.targetTroopId}`; button.addEventListener('click', () => options.sendAction(choice)); panel.append(button); }
+    if (match.pendingResolution?.kind === 'rule-choice') {
+      const confirm = match.pendingResolution.allTargets || match.pendingResolution.intents.length === 1;
+      message.textContent = confirm ? match.pendingResolution.required ? 'Perform the required triggered action.' : 'Perform the triggered action, or skip it.' : 'Choose a highlighted target for the triggered effect.';
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = confirm ? match.pendingResolution.allTargets ? 'Perform on all targets' : 'Perform action' : 'Choose effect target'; button.classList.add('active-action');
+      const choice = legal.find(action => action.type === 'resolve-rule');
+      if (confirm && choice) button.addEventListener('click', () => options.sendAction(choice));
+      panel.append(button);
+      const skip = legal.find(action => action.type === 'resolve-pass');
+      if (skip) { const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Skip'; button.addEventListener('click', () => options.sendAction(skip)); panel.append(button); }
+    } else if (match.pendingResolution?.kind === 'revive') {
+      for (const choice of legal.filter(action => action.type === 'resolve-revive')) { if (!choice.targetTroopId) continue; const button = document.createElement('button'); button.type = 'button'; button.textContent = `Revive ${catalogueById.get(choice.targetTroopId)?.name ?? choice.targetTroopId}`; button.addEventListener('click', () => options.sendAction(choice)); panel.append(button); }
       const skip = legal.find(action => action.type === 'resolve-pass'); if (skip) { const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Skip'; button.addEventListener('click', () => options.sendAction(skip)); panel.append(button); }
     } else if (match.pendingResolution && ['death-attack', 'instant-ranged', 'instant-magic', 'stun'].includes(match.pendingResolution.kind)) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = match.pendingResolution.kind === 'death-attack' ? '💀 Choose ranged target' : match.pendingResolution.kind === 'stun' ? `${stunIcon} Choose target troop` : match.pendingResolution.kind === 'instant-magic' ? 'F🔥 Choose target hex' : 'F🏹 Choose target hex'; button.classList.add('active-action'); panel.append(button);

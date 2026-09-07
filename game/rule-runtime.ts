@@ -1,9 +1,14 @@
 import { unitId, type GameState, type UnitId, type UnitState } from './engine.js';
 import { evaluateObservableCondition, matchRuleAnchor, selectRuleHexes, selectRuleUnits, type NormalizedEventRecord, type RuleBinding, type RuleEvaluationContext, type RuleEvaluationResult } from './rule-evaluator.js';
-import { cleanupStoredContributions, createStoredContributions } from './rule-state.js';
+import { cleanupStoredContributions, createStoredContributions, selectStateTargetUnitIds } from './rule-state.js';
 import type { ParsedRule, ParsedTriggerRule, RuleEntity, RulePhrase, RuleTriggeredConsequence } from './rule-parser.js';
 import type { TroopSeed } from './cards.js';
 import type { Player } from './types.js';
+import { applyResourceEvent, implicitActionCosts, validateActionCosts } from './action-costs.js';
+import { applyNamedValue, type NamedValue } from './named-values.js';
+import { scheduleRuleWork, takeScheduledRules } from './rule-scheduler.js';
+import { ruleWord } from './rule-vocabulary.js';
+import { consequenceIsMandatory } from './consequence-policy.js';
 
 export interface RuntimeRuleSource {
   id: string;
@@ -14,6 +19,10 @@ export interface RuntimeRuleSource {
 }
 
 export interface NormalizedActionIntent {
+  named?: NamedValue;
+  costsPaid?: boolean;
+  resumeBundle?: boolean;
+  confirmed?: boolean;
   name: string;
   subject?: RuleBinding;
   object?: RuleBinding;
@@ -35,6 +44,11 @@ export interface NormalizedApplyResult {
 }
 
 export interface RuleRuntimeHooks {
+  choose?(intents: NormalizedActionIntent[], source: RuntimeRuleSource, event: NormalizedEventRecord, allTargets?: boolean): void;
+  /** Engine adapters opt into implicit payment; generic mutation hooks may manage their own costs. */
+  actionCosts?: boolean;
+  prepare?(intent: NormalizedActionIntent): 'waiting' | 'skip' | undefined;
+  bundle?(events: readonly NormalizedActionIntent[], kind: 'cost' | 'effect'): void;
   mode?(intent: NormalizedActionIntent): 'immediate' | 'deferred';
   /** Validate and mutate authoritative state for one already-materialized action. */
   apply(
@@ -52,11 +66,70 @@ export interface RuleRuntimeHooks {
   ): NormalizedApplyResult | undefined;
 }
 
+export type RuleRuntimeWork =
+  | { kind: 'intent'; intent: NormalizedActionIntent }
+  | { kind: 'triggers'; event: NormalizedEventRecord; sources: RuntimeRuleSource[] }
+  | { kind: 'resolved'; intent: NormalizedActionIntent }
+  | { kind: 'consequences'; source: RuntimeRuleSource; event: NormalizedEventRecord; index: number; paid?: boolean; deferred?: RuleRuntimeWork[] };
+
+const bundles = new WeakMap<GameState, RuleRuntimeWork[]>();
+
+function dispatchWork(state: GameState, cards: ReadonlyMap<string, TroopSeed>, rules: readonly RuntimeRuleSource[], hooks: RuleRuntimeHooks, presentation: NormalizedEventRecord[], work: RuleRuntimeWork[]): RuleRuntimeResult | undefined {
+  for (let index = 0; index < work.length; index++) {
+    if (state.pendingResolution) {
+      state.ruleWork = [...(state.ruleWork ?? []), ...work.slice(index)];
+      return undefined;
+    }
+    const item = work[index];
+    let result: RuleRuntimeResult | undefined;
+    if (item.kind === 'intent') result = executeNormalizedIntent(state, cards, rules, item.intent, hooks, presentation);
+    else if (item.kind === 'triggers') result = executeTriggers(state, cards, rules, item.event, hooks, presentation, item.sources.map(source => ({ source, context: {} as RuleEvaluationContext })));
+    else if (item.kind === 'consequences') result = executeConsequenceBundle(state, cards, rules, item.source, item.event, hooks, presentation, item.index, item.paid, item.deferred);
+    else {
+      const resolved = eventFromIntent(state, item.intent, 'resolved', true);
+      record(state, resolved); presentation.push(resolved);
+      result = executeTriggers(state, cards, rules, resolved, hooks, presentation);
+    }
+    if (result?.canceled || result?.pendingChoice) return result;
+  }
+  return undefined;
+}
+
+export function resumeRuleRuntime(state: GameState, cards: ReadonlyMap<string, TroopSeed>, rules: readonly RuntimeRuleSource[], hooks: RuleRuntimeHooks): void {
+  while (!state.pendingResolution && state.ruleWork?.length) {
+    const work = state.ruleWork;
+    state.ruleWork = [];
+    const result = dispatchWork(state, cards, rules, hooks, [], work);
+    if (result?.canceled) throw new Error(result.reason ?? 'Rule continuation failed.');
+  }
+}
+
+/** Mutate every member before releasing its captured triggers. */
+export function executeNormalizedBundle(state: GameState, cards: ReadonlyMap<string, TroopSeed>, rules: readonly RuntimeRuleSource[], intents: readonly NormalizedActionIntent[], hooks: RuleRuntimeHooks, presentation: NormalizedEventRecord[] = [], kind: 'cost' | 'effect' = 'effect'): RuleRuntimeResult {
+  if (kind === 'cost' && !validateActionCosts(state, intents)) return { presentationEvents: presentation, canceled: true, reason: 'The complete cost bundle cannot be paid.' };
+  const parent = bundles.get(state);
+  const work: RuleRuntimeWork[] = [];
+  bundles.set(state, work);
+  hooks.bundle?.(intents, kind);
+  try {
+    for (const intent of intents) {
+      const result = executeNormalizedIntent(state, cards, rules, intent, hooks, presentation);
+      if (result.canceled || result.pendingChoice) return result;
+    }
+  } finally {
+    if (parent) bundles.set(state, parent); else bundles.delete(state);
+  }
+  // Costs are a boundary: their triggers finish before the effect bundle.
+  const result = dispatchWork(state, cards, rules, hooks, presentation, work);
+  return result ?? { presentationEvents: presentation };
+}
+
 export interface PendingRuleChoice {
   ruleId: string;
   consequenceIndex: number;
   operand: 'subject' | 'object';
   legalHexes: string[];
+  confirmationOnly?: boolean;
 }
 
 export interface RuleRuntimeResult {
@@ -83,6 +156,7 @@ function contextFor(state: GameState, cards: ReadonlyMap<string, TroopSeed>, con
 }
 
 function bindingForEntity(entity: RuleEntity, context: RuleEvaluationContext): RuleEvaluationResult<RuleBinding[]> {
+  if (entity.kind === 'player') return { ok: true, value: [{ kind: 'player', player: entity.player === 'you' ? context.controller : context.controller === 1 ? 2 : 1 }] };
   if (entity.kind === 'reference') {
     const value = entity.reference === 'self' ? context.self : entity.reference === 'subj' ? context.subj : context.obj;
     return value ? { ok: true, value: [value] } : { ok: false, code: 'missing-binding', message: `Missing ${entity.reference} binding.` };
@@ -97,6 +171,7 @@ function bindingForEntity(entity: RuleEntity, context: RuleEvaluationContext): R
 
 function fixedCoordinate(binding: RuleBinding | undefined, state: GameState, source?: RuntimeRuleSource, event?: NormalizedEventRecord): string | undefined {
   if (!binding) return undefined;
+  if (binding.kind === 'player') return undefined;
   if (binding.kind === 'hex') return binding.coordinate;
   return state.units.find(unit => unitId(unit) === binding.unitId)?.coordinate
     ?? (binding.unitId === source?.sourceUnitId ? source.sourceSnapshot?.coordinate : undefined)
@@ -112,20 +187,36 @@ function materializeEvent(
 ): RuleEvaluationResult<{ intents?: NormalizedActionIntent[]; pendingChoice?: PendingRuleChoice }> {
   const subjects = bindingForEntity(phrase.subject, context);
   if (!subjects.ok) return subjects;
-  const objects = phrase.object ? bindingForEntity(phrase.object, { ...context, phraseSubject: fixedCoordinate(subjects.value[0], context.state, source, event) as never }) : { ok: true as const, value: [] };
+  const targetContext = { ...context, phraseSubject: fixedCoordinate(subjects.value[0], context.state, source, event) as never };
+  let objects = phrase.object ? bindingForEntity(phrase.object, targetContext) : { ok: true as const, value: [] };
+  if (phrase.action.name.startsWith('up-unit-') && phrase.object && phrase.object.kind !== 'reference') {
+    const units = selectRuleUnits(phrase.object, targetContext);
+    objects = units.ok ? { ok: true, value: units.value.map(unit => ({ kind: 'unit' as const, unitId: unitId(unit) })) } : units;
+  }
   if (!objects.ok) return objects;
   if (subjects.value.length !== 1) return { ok: true, value: { pendingChoice: { ruleId: source.id, consequenceIndex, operand: 'subject', legalHexes: subjects.value.map(item => fixedCoordinate(item, context.state, source, event)).filter((item): item is string => Boolean(item)) } } };
   if (phrase.object && phrase.targetPolicy !== 'all' && objects.value.length === 0) return { ok: true, value: { intents: [] } };
-  if (phrase.object && phrase.targetPolicy !== 'all' && objects.value.length > 1) return { ok: true, value: { pendingChoice: { ruleId: source.id, consequenceIndex, operand: 'object', legalHexes: objects.value.map(item => fixedCoordinate(item, context.state, source, event)).filter((item): item is string => Boolean(item)) } } };
+  const chooseTarget = phrase.targetPolicy !== 'all' && objects.value.length > 1;
+  const mandatory = consequenceIsMandatory(phrase.action, phrase.mandatory, source.rule.kind === 'trigger' && Boolean(source.rule.costs?.length));
+  const optionalAction = !mandatory && ruleWord(phrase.action.name)?.eventClass === 'action';
+  const pendingChoice: PendingRuleChoice | undefined = phrase.object && objects.value.length > 0 && (chooseTarget || optionalAction) ? { ruleId: source.id, consequenceIndex, operand: 'object', confirmationOnly: !chooseTarget, legalHexes: objects.value.map(item => fixedCoordinate(item, context.state, source, event)).filter((item): item is string => Boolean(item)) } : undefined;
   const subject = subjects.value[0];
-  const selectedObjects = phrase.object ? objects.value : [undefined];
-  return { ok: true, value: { intents: selectedObjects.map(object => ({
-    name: phrase.action.name, subject, ...(object ? { object } : {}),
+  const selectedObjects = (phrase.object ? objects.value : [undefined]).flatMap(object => {
+    if (phrase.action.name.startsWith('up-hex-')) {
+      const coordinate = fixedCoordinate(object, context.state, source, event);
+      return coordinate ? [{ kind: 'hex' as const, coordinate: coordinate as never }] : [];
+    }
+    if (phrase.action.name.startsWith('up-unit-') && object?.kind !== 'unit') return [];
+    return [object];
+  });
+  return { ok: true, value: { ...(pendingChoice ? { pendingChoice } : {}), intents: selectedObjects.map(object => ({
+    name: phrase.action.name, ...(phrase.action.named ? { named: phrase.action.named } : {}), subject, ...(object ? { object } : {}),
     origin: fixedCoordinate(subject, context.state, source, event), target: fixedCoordinate(object, context.state, source, event),
     parameters: [...phrase.action.parameters], qualifiers: [...phrase.action.qualifiers], controller: context.controller,
     causedByRuleId: source.id,
+    ...(phrase.costsPaid ? { costsPaid: true } : {}),
     triggeringEvent: event,
-    ...(phrase.mandatory ? { mandatory: true as const } : {})
+    ...(mandatory ? { mandatory: true as const } : {})
   })) } };
 }
 
@@ -139,10 +230,6 @@ function matchingRules(rules: readonly RuntimeRuleSource[], event: NormalizedEve
       const opponentPhase = source.rule.anchor.phase === 'opponent-start' || source.rule.anchor.phase === 'opponent-end';
       if (opponentPhase ? unit.owner === event.controller : unit.owner !== event.controller) continue;
     }
-    const inactive = unit.inactiveOnTurn !== undefined || unit.inactiveUntilTurn !== undefined
-      || state.lastActingTroopId?.[unit.owner] === unit.troopId;
-    const deathAnchor = source.rule.anchor.kind === 'relation' && source.rule.anchor.action.name === 'die';
-    if (inactive && !deathAnchor && source.rule.consequences.some(consequence => consequence.kind === 'event')) continue;
     const self: RuleBinding = { kind: 'unit', unitId: source.sourceUnitId };
     const context = contextFor(state, cards, unit.owner, self, event);
     const anchor = matchRuleAnchor(source.rule.anchor, event, context);
@@ -159,7 +246,7 @@ function record(state: GameState, event: NormalizedEventRecord): void {
 
 function eventFromIntent(state: GameState, intent: NormalizedActionIntent, stage: 'target' | 'resolved', success: boolean, canceled = false): NormalizedEventRecord {
   return {
-    id: nextEventId(state), name: intent.name, stage,
+    id: nextEventId(state), name: intent.name, ...(intent.named ? { named: intent.named } : {}), stage,
     ...(intent.subject ? { subject: intent.subject } : {}),
     ...(intent.object ? { object: intent.object } : {}),
     ...(intent.origin ? { origin: intent.origin as NormalizedEventRecord['origin'] } : {}),
@@ -169,7 +256,7 @@ function eventFromIntent(state: GameState, intent: NormalizedActionIntent, stage
   };
 }
 
-function executeConsequence(
+function applyConsequence(
   state: GameState,
   cards: ReadonlyMap<string, TroopSeed>,
   rules: readonly RuntimeRuleSource[],
@@ -245,12 +332,64 @@ function executeConsequence(
   }
   const materialized = materializeEvent(consequence.event, context, source, consequenceIndex, event);
   if (!materialized.ok) return { presentationEvents: presentation, canceled: true, reason: materialized.message };
-  if (materialized.value.pendingChoice) return { presentationEvents: presentation, pendingChoice: materialized.value.pendingChoice };
+  if (materialized.value.pendingChoice) {
+    if (hooks.choose && materialized.value.intents) { hooks.choose(materialized.value.intents, source, event, consequence.event.targetPolicy === 'all'); return; }
+    return { presentationEvents: presentation, pendingChoice: materialized.value.pendingChoice };
+  }
   for (const intent of materialized.value.intents ?? []) {
     const result = executeNormalizedIntent(state, cards, rules, intent, hooks, presentation);
-    if (result.pendingChoice || result.canceled) return result;
+    if (result.pendingChoice) return result;
   }
   return undefined;
+}
+
+function executeConsequence(state: GameState, cards: ReadonlyMap<string, TroopSeed>, rules: readonly RuntimeRuleSource[], source: RuntimeRuleSource, consequence: RuleTriggeredConsequence, index: number, event: NormalizedEventRecord, hooks: RuleRuntimeHooks, presentation: NormalizedEventRecord[]): RuleRuntimeResult | undefined {
+  const owner = state.units.find(unit => unitId(unit) === source.sourceUnitId) ?? source.sourceSnapshot;
+  if (!owner) return;
+  const context = contextFor(state, cards, owner.owner, { kind: 'unit', unitId: source.sourceUnitId }, event);
+  if (consequence.at) {
+    const { at, ...immediate } = consequence;
+    if (immediate.kind === 'event') {
+      const materialized = materializeEvent(immediate.event, context, source, index, event);
+      if (!materialized.ok) return { canceled: true, reason: materialized.message, presentationEvents: presentation };
+      if (materialized.value.pendingChoice && !materialized.value.pendingChoice.confirmationOnly) return { pendingChoice: materialized.value.pendingChoice, presentationEvents: presentation };
+      for (const intent of materialized.value.intents ?? []) scheduleRuleWork(state, at, owner.owner, nextEventId(state) - 1, { kind: 'intent', intent });
+    } else {
+      const targets = immediate.kind === 'distributed-state' ? selectRuleUnits(immediate.selector, context) : selectRuleUnits(immediate.state.subject, context);
+      if (!targets.ok) return { canceled: true, reason: targets.message, presentationEvents: presentation };
+      for (const target of targets.value) {
+        const frozen = { ...event, object: { kind: 'unit' as const, unitId: unitId(target) } };
+        const stored: RuleTriggeredConsequence = { kind: 'stored-state', state: { ...immediate.state, subject: { kind: 'reference', reference: 'obj' } }, lifetime: immediate.lifetime };
+        const scheduledSource: RuntimeRuleSource = { ...source, sourceSnapshot: owner, rule: { kind: 'trigger', anchor: { kind: 'phase', phase: 'start' }, consequences: [stored] } };
+        scheduleRuleWork(state, at, owner.owner, nextEventId(state) - 1, { kind: 'consequences', source: scheduledSource, event: frozen, index: 0 });
+      }
+    }
+    return;
+  }
+  if (consequence.kind === 'distributed-state' && consequence.state.property.name.startsWith('up-')) {
+    const targets = selectRuleUnits(consequence.selector, context);
+    if (!targets.ok) return { canceled: true, reason: targets.message, presentationEvents: presentation };
+    for (const target of targets.value) {
+      const result = executeConsequence(state, cards, rules, source, { kind: 'stored-state', state: { ...consequence.state, subject: { kind: 'reference', reference: 'obj' } }, lifetime: consequence.lifetime }, index, { ...event, object: { kind: 'unit', unitId: unitId(target) } }, hooks, presentation);
+      if (result?.canceled || result?.pendingChoice) return result;
+    }
+    return;
+  }
+  if (consequence.kind === 'stored-state' && consequence.state.property.name.startsWith('up-')) {
+    const targets = selectStateTargetUnitIds(consequence.state, context);
+    if (!targets.ok) return { canceled: true, reason: targets.message, presentationEvents: presentation };
+    for (const targetUnitId of targets.value) {
+      const object: RuleBinding = { kind: 'unit', unitId: targetUnitId };
+      const intent: NormalizedActionIntent = { name: consequence.state.property.name, subject: context.self, object, parameters: consequence.state.property.parameters.map(value => typeof value === 'number' ? value : undefined), qualifiers: [], controller: owner.owner, causedByRuleId: source.id };
+      const result = executeNormalizedIntent(state, cards, rules, intent, { ...hooks, actionCosts: false, prepare: undefined, mode: () => 'immediate', apply: () => {
+        const applied = applyConsequence(state, cards, rules, source, { ...consequence, state: { ...consequence.state, subject: { kind: 'reference', reference: 'obj' } } }, index, { ...event, object }, hooks, presentation);
+        return { success: !applied?.canceled, reason: applied?.reason };
+      } }, presentation);
+      if (result.canceled || result.pendingChoice) return result;
+    }
+    return;
+  }
+  return applyConsequence(state, cards, rules, source, consequence, index, event, hooks, presentation);
 }
 
 function executeTriggers(
@@ -264,14 +403,139 @@ function executeTriggers(
 ): RuleRuntimeResult | undefined {
   // Catalogue/deck order is deterministic. Each rule's consequences execute
   // left-to-right; a choice boundary suspends before later consequences.
-  for (const { source } of matched) {
-    const trigger = source.rule as ParsedTriggerRule;
-    for (const [index, consequence] of trigger.consequences.entries()) {
-      const result = executeConsequence(state, cards, rules, source, consequence, index, event, hooks, presentation);
-      if (result?.pendingChoice || result?.canceled) return result;
+  for (const [index, { source }] of matched.entries()) {
+    if (state.pendingResolution) {
+      (state.ruleWork ??= []).push({ kind: 'triggers', event, sources: matched.slice(index).map(item => item.source) });
+      return;
     }
+    const result = executeConsequenceBundle(state, cards, rules, source, event, hooks, presentation);
+    if (result?.pendingChoice || result?.canceled) return result;
   }
   return undefined;
+}
+
+function executeConsequenceBundle(state: GameState, cards: ReadonlyMap<string, TroopSeed>, rules: readonly RuntimeRuleSource[], source: RuntimeRuleSource, event: NormalizedEventRecord, hooks: RuleRuntimeHooks, presentation: NormalizedEventRecord[], start = 0, paid = false, deferred: RuleRuntimeWork[] = []): RuleRuntimeResult | undefined {
+  const trigger = source.rule as ParsedTriggerRule;
+  if (start === 0) {
+    const controller = source.sourceSnapshot?.owner ?? Number(source.sourceUnitId.slice(0, 1)) as Player;
+    hooks.bundle?.(trigger.consequences.flatMap(item => item.kind === 'event' ? [{ name: item.event.action.name, subject: { kind: 'unit' as const, unitId: source.sourceUnitId }, controller, parameters: [...item.event.action.parameters], qualifiers: [...item.event.action.qualifiers], causedByRuleId: source.id }] : []), 'effect');
+  }
+  if (!trigger.costs && !paid && hooks.actionCosts) {
+    const unit = state.units.find(candidate => unitId(candidate) === source.sourceUnitId) ?? source.sourceSnapshot;
+    if (!unit) return;
+    const context = contextFor(state, cards, unit.owner, { kind: 'unit', unitId: source.sourceUnitId }, event);
+    const costs: NormalizedActionIntent[] = [];
+    const seen = new Set<string>();
+    for (const consequence of trigger.consequences) {
+      if (consequence.kind !== 'event' || consequence.at) continue;
+      const materialized = materializeEvent(consequence.event, context, source, 0, event);
+      if (!materialized.ok || !materialized.value.intents) continue;
+      for (const intent of materialized.value.intents) for (const cost of implicitActionCosts(intent, false)) {
+        const key = JSON.stringify([cost.name, cost.object]);
+        if (!seen.has(key)) { seen.add(key); costs.push(cost); }
+      }
+    }
+    if (!validateActionCosts(state, costs)) return;
+    const first = trigger.consequences[0];
+    if (first?.kind === 'event' && !first.at && first.event.object && hooks.choose) {
+      const selected = materializeEvent(first.event, context, source, 0, event);
+      if (selected.ok && selected.value.pendingChoice && selected.value.intents) {
+        hooks.choose(selected.value.intents, source, event, first.event.targetPolicy === 'all');
+        if (state.pendingResolution) {
+          state.pendingResolution.costs = costs;
+          (state.ruleWork ??= []).push({ kind: 'consequences', source, event, index: 1, paid: true, deferred });
+        }
+        return;
+      }
+    }
+    if (first?.kind === 'event' && !first.event.object) {
+      const materialized = materializeEvent(first.event, context, source, 0, event);
+      const intent = materialized.ok ? materialized.value.intents?.[0] : undefined;
+      const prepared = intent && hooks.prepare?.(intent);
+      if (prepared === 'skip') return;
+      if (prepared === 'waiting' && state.pendingResolution) {
+        state.pendingResolution.costs = costs;
+        (state.ruleWork ??= []).push({ kind: 'consequences', source, event, index: 1, paid: true, deferred });
+        return;
+      }
+    }
+    if (costs.length) executeNormalizedBundle(state, cards, rules, costs, hooks, presentation, 'cost');
+    paid = true;
+  }
+  if (trigger.costs && !paid) {
+    const unit = state.units.find(candidate => unitId(candidate) === source.sourceUnitId) ?? source.sourceSnapshot;
+    if (!unit) return;
+    const context = contextFor(state, cards, unit.owner, { kind: 'unit', unitId: source.sourceUnitId }, event);
+    const costs: NormalizedActionIntent[] = [];
+    for (const phrase of trigger.costs) {
+      const materialized = materializeEvent(phrase, context, source, 0, event);
+      if (!materialized.ok || !materialized.value.intents) return;
+      costs.push(...materialized.value.intents);
+    }
+    if (!validateActionCosts(state, costs)) return;
+    const first = trigger.consequences[0];
+    if (first?.kind === 'event' && !first.at && first.event.object && hooks.choose) {
+      const selected = materializeEvent(first.event, context, source, 0, event);
+      if (selected.ok && selected.value.pendingChoice && selected.value.intents) {
+        hooks.choose(selected.value.intents, source, event, first.event.targetPolicy === 'all');
+        if (state.pendingResolution) {
+          state.pendingResolution.costs = costs;
+          (state.ruleWork ??= []).push({ kind: 'consequences', source, event, index: 1, paid: true, deferred });
+        }
+        return;
+      }
+    }
+    if (first?.kind === 'event' && !first.event.object) {
+      const materialized = materializeEvent(first.event, context, source, 0, event);
+      const intent = materialized.ok ? materialized.value.intents?.[0] : undefined;
+      if (intent && hooks.prepare?.(intent) === 'waiting' && state.pendingResolution) {
+        state.pendingResolution.costs = costs;
+        (state.ruleWork ??= []).push({ kind: 'consequences', source, event, index: 1, paid: true, deferred });
+        return;
+      }
+    }
+    executeNormalizedBundle(state, cards, rules, costs, hooks, presentation, 'cost');
+    paid = true;
+  }
+  const parent = bundles.get(state);
+  const work: RuleRuntimeWork[] = [...deferred];
+  bundles.set(state, work);
+  try {
+    for (let index = start; index < trigger.consequences.length; index++) {
+      if (state.pendingResolution) {
+        state.ruleWork = [...(state.ruleWork ?? []), { kind: 'consequences', source, event, index, paid, deferred: work }];
+        return;
+      }
+      const consequence = trigger.consequences[index];
+      const result = executeConsequence(state, cards, rules, source, paid && consequence.kind === 'event' && !consequence.at ? { ...consequence, event: { ...consequence.event, costsPaid: true } } : consequence, index, event, hooks, presentation);
+      if (result?.pendingChoice || result?.canceled) return result;
+    }
+  } finally {
+    if (parent) bundles.set(state, parent); else bundles.delete(state);
+  }
+  if (state.pendingResolution) {
+    (state.ruleWork ??= []).push({ kind: 'consequences', source, event, index: trigger.consequences.length, paid, deferred: work });
+    return;
+  }
+  return dispatchWork(state, cards, rules, hooks, presentation, work);
+}
+
+export function executeNormalizedCommand(state: GameState, cards: ReadonlyMap<string, TroopSeed>, rules: readonly RuntimeRuleSource[], intent: NormalizedActionIntent, hooks: RuleRuntimeHooks, followups?: RuleTriggeredConsequence[]): RuleRuntimeResult {
+  if (!followups?.length || intent.subject?.kind !== 'unit') return executeNormalizedIntent(state, cards, rules, intent, hooks);
+  const source: RuntimeRuleSource = {
+    id: `${intent.subject.unitId}:action-bundle`, sourceUnitId: intent.subject.unitId,
+    sourceSnapshot: structuredClone(state.units.find(unit => unitId(unit) === (intent.subject as Extract<RuleBinding, { kind: 'unit' }>).unitId)),
+    rule: { kind: 'trigger', anchor: { kind: 'phase', phase: 'action-resolve' }, consequences: followups }
+  };
+  const work: RuleRuntimeWork[] = [];
+  const parent = bundles.get(state);
+  bundles.set(state, work);
+  let result: RuleRuntimeResult;
+  try { result = executeNormalizedIntent(state, cards, rules, intent, hooks); }
+  finally { if (parent) bundles.set(state, parent); else bundles.delete(state); }
+  if (!result.event) return result;
+  const continued = executeConsequenceBundle(state, cards, rules, source, result.event, hooks, result.presentationEvents, 0, true, work);
+  return continued ?? result;
 }
 
 export function executeNormalizedIntent(
@@ -282,6 +546,21 @@ export function executeNormalizedIntent(
   hooks: RuleRuntimeHooks,
   presentation: NormalizedEventRecord[] = []
 ): RuleRuntimeResult {
+  const prepared = hooks.prepare?.(intent);
+  if (prepared) return { presentationEvents: presentation };
+  if (hooks.actionCosts && !intent.costsPaid) {
+    const costs = implicitActionCosts(intent, false);
+    if (!validateActionCosts(state, costs)) return { presentationEvents: presentation };
+    if (costs.length) {
+      const payment = executeNormalizedBundle(state, cards, rules, costs, hooks, presentation, 'cost');
+      if (payment.canceled || payment.pendingChoice) return payment;
+      intent.costsPaid = true;
+      if (state.pendingResolution) {
+        (state.ruleWork ??= []).push({ kind: 'intent', intent });
+        return { presentationEvents: presentation };
+      }
+    }
+  }
   const announced = eventFromIntent(state, intent, 'target', true);
   record(state, announced);
   presentation.push(announced);
@@ -298,9 +577,17 @@ export function executeNormalizedIntent(
     if (boundaryCalled) return;
     boundaryCalled = true;
     cleanupStoredContributions(appliedState, announced, 'after', contextFor(appliedState, cards, intent.controller, self, announced));
-    post = executeTriggers(appliedState, cards, rules, announced, hooks, presentation, matched);
+    const work: RuleRuntimeWork = { kind: 'triggers', event: announced, sources: matched.map(item => item.source) };
+    const bundle = bundles.get(appliedState);
+    if (bundle) bundle.push(work);
+    else {
+      const continuation = appliedState.ruleWork?.[0];
+      if (intent.resumeBundle && continuation?.kind === 'consequences') (continuation.deferred ??= []).push(work);
+      else post = dispatchWork(appliedState, cards, rules, hooks, presentation, [work]);
+    }
   };
-  const applied = hooks.apply(intent, state, afterApply);
+  const resource = applyNamedValue(state, intent.name, intent.object, intent.named) ?? applyResourceEvent(state, intent);
+  const applied = resource === undefined ? hooks.apply(intent, state, afterApply) : { success: resource };
   if (!applied.success || applied.canceled) {
     announced.success = false;
     announced.canceled = true;
@@ -309,6 +596,16 @@ export function executeNormalizedIntent(
   if (!boundaryCalled) afterApply(state);
   if (post?.pendingChoice || post?.canceled) return { ...post, event: announced };
   if (hooks.mode?.(intent) === 'deferred') return { event: announced, presentationEvents: presentation };
+  const bundle = bundles.get(state);
+  if (bundle) {
+    bundle.push({ kind: 'resolved', intent });
+    return { event: announced, presentationEvents: presentation };
+  }
+  const continuation = state.ruleWork?.[0];
+  if (intent.resumeBundle && continuation?.kind === 'consequences') {
+    (continuation.deferred ??= []).push({ kind: 'resolved', intent });
+    return { event: announced, presentationEvents: presentation };
+  }
   const resolved = eventFromIntent(state, intent, 'resolved', true);
   record(state, resolved);
   presentation.push(resolved);
@@ -328,6 +625,8 @@ export function emitNormalizedResolved(
   record(state, event);
   const presentation = [event];
   const matched = matchingRules(rules, event, state, cards);
+  const bundle = bundles.get(state);
+  if (bundle) { bundle.push({ kind: 'triggers', event, sources: matched.map(item => item.source) }); return { resolved: event, presentationEvents: presentation }; }
   const triggered = executeTriggers(state, cards, rules, event, hooks, presentation, matched);
   return triggered ? { ...triggered, resolved: event } : { resolved: event, presentationEvents: presentation };
 }
@@ -347,12 +646,16 @@ export function emitNormalizedEvent(
   record(state, event);
   const matched = matchingRules(rules, event, state, cards);
   const self = event.subject ?? event.object;
-  if (self) {
-    const context = contextFor(state, cards, event.controller, self, event);
+  {
+    const context = contextFor(state, cards, event.controller, self ?? { kind: 'player', player: event.controller }, event);
     cleanupStoredContributions(state, event, 'before', context);
     cleanupStoredContributions(state, event, 'after', context);
   }
   const presentation = [event];
-  const triggered = executeTriggers(state, cards, rules, event, hooks, presentation, matched);
+  const scheduled = takeScheduledRules(state, event);
+  const bundle = bundles.get(state);
+  const work: RuleRuntimeWork[] = [{ kind: 'triggers', event, sources: matched.map(item => item.source) }, ...scheduled];
+  if (bundle) { bundle.push(...work); return { event, presentationEvents: presentation }; }
+  const triggered = dispatchWork(state, cards, rules, hooks, presentation, work);
   return triggered ? { ...triggered, event } : { event, presentationEvents: presentation };
 }

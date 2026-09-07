@@ -2,6 +2,25 @@
 
 ## Coordinate systems
 
+Hex action rows and deck-builder descriptions use the shared selector-aware
+card formatter, preserving colored targets instead of geometry bounds such as
+8. Move/fly distances follow the icon; compact filtered ranges retain distance.
+
+Hover cards display source-named action updates and modifier contributions;
+control and shields use signed values followed by their label/icon. Simple
+action ranges stay numeric after icons, and triggered actions explicitly say
+“you may” or “you must”.
+
+The action bar offers Perform action / Skip for optional single-target effects
+and Perform on all targets / Skip for optional `all` effects. Highlighted target
+clicks accept the same server-owned choice; `all` always accepts the whole group.
+
+Explicit rule selectors can open a `rule-choice` pending resolution. The action
+bar prompts for a highlighted target and offers Skip when allowed. Confirming
+submits `resolve-rule`; target legality and continuation state remain server
+owned. Card action projections carry selectors; numeric display bounds are
+derived for existing icon layouts.
+
 The game uses axial coordinate strings such as `"-1,2"`. `game/board.ts` owns topology; `hex-grid.ts` maps axial coordinates to SVG pixels.
 
 Important constants currently live near the SVG construction code:
@@ -302,6 +321,15 @@ When Move, Fly, or triggered Pull projects either Bash participant away, the old
 - [ ] Pass-turn/last-actor availability transition.
 
 ## Visual verification checklist
+
+Card text comes from `client/card-rule-text.ts` and `rule-selector-text.ts`.
+Simple hero, side, and control queries retain their short words and relative
+player colors; neutral control uses white. Origin movement anchors retain `from`.
+The three effect rows use compact selectors (`X` for complex queries), `w`,
+owner colors, and purple magic modifiers. Hover expands selectors and conditions
+without explaining standard action mechanics. `svg-text-fit.ts` measures rendered
+SVG text and truncates overflowing rows with `...`, preserving colored spans and
+whole graphemes. Extra effects share the third row before width fitting.
 
 For each animation, check:
 

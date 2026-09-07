@@ -1,7 +1,7 @@
 import type { UpgradableAbility } from '../game/cards.js';
 import { adjacentCoordinates, hexDistance, straightLine, type Coordinate } from '../game/board.js';
 import type { Player } from '../game/types.js';
-import { appendHoverRules, createHoverCard } from './card-presentation.js';
+import { appendHoverRules, appendMagicDescriptionText, createHoverCard } from './card-presentation.js';
 import type { HexGridState } from './hex-grid-state.js';
 import type { GameActionType, ServerBashState, ServerLegalAction, ServerMatchState, ServerUnitState } from './protocol.js';
 import { catalogueById, type Troop } from './troop-view.js';
@@ -192,10 +192,25 @@ function showServerHoverDetailsForCoordinate(coordinate: Coordinate): void {
     if (bash) {
       const modifier = serverModifier(unit, bash.target, bash);
       const combat = document.createElement('div'); combat.classList.add('hover-detail-line'); combat.textContent = `Bash strength: ${unit.combat.health} + ${modifier} = ${unit.combat.health + modifier}`; copy.append(combat);
-      for (const entry of serverModifierEntries(unit, bash.target, bash)) {
-        const source = document.createElement('div'); source.classList.add('hover-detail-line'); source.textContent = `${entry.label}: ${entry.value >= 0 ? '+' : ''}${entry.value}`; copy.append(source);
-      }
     }
+    const entries = bash ? serverModifierEntries(unit, bash.target, bash) : unit.combat.modifiers;
+    const signed = (value: number) => `${value >= 0 ? '+' : ''}${value}`;
+    const addModifier = (text: string) => { const row = document.createElement('div'); row.classList.add('hover-detail-line'); appendMagicDescriptionText(row, text, unit.owner); copy.append(row); };
+    for (const entry of entries) {
+      if (entry.label === 'Rules' && unit.ruleSources) continue;
+      addModifier(`${signed(entry.value)} ${entry.label === 'Shield' ? '🛡️' : entry.label.toLowerCase()}`);
+    }
+    const sources = new Map<string, [number, number]>();
+    for (const { sourceName, property } of unit.ruleSources ?? []) {
+      if (property.name !== 'up-mod') continue;
+      const pair = sources.get(sourceName) ?? [0, 0];
+      pair[0] += Number(property.parameters[0] ?? 0); pair[1] += Number(property.parameters[1] ?? 0); sources.set(sourceName, pair);
+    }
+    for (const [name, [physical, magic]] of sources) {
+      const value = `${physical && entries.some(entry => entry.label === 'Rules') ? signed(physical) : ''}${magic ? `~${signed(magic)}~` : ''}`;
+      if (value) addModifier(`${value} ${name}`);
+    }
+    if (unit.magicModifierBonus) addModifier(`~${signed(unit.magicModifierBonus)} 🛡️~`);
     appendHoverRules(copy, troop);
     hoverDetailsPanel.append(card);
   }

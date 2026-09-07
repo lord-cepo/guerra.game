@@ -97,7 +97,11 @@ function eventBindingMatches(binding: RuleBinding | undefined, unit: UnitId): bo
 function lifetimeMatches(item: StoredRuleContribution, event: NormalizedEventRecord): boolean {
   if (item.lifetime.kind === 'permanent') return false;
   const pattern = item.lifetime.event;
-  if (pattern.kind === 'phase') return event.name === pattern.phase && event.stage === 'target';
+  if (pattern.kind === 'phase') {
+    const owner = Number((item.lifetimeSelfUnitId ?? item.sourceUnitId).slice(0, 1));
+    const opponent = pattern.phase.startsWith('opponent-');
+    return event.name === pattern.phase && event.stage === 'target' && (opponent ? event.controller !== owner : event.controller === owner) && (!pattern.next || event.id > item.createdByEventId);
+  }
   if (event.name !== pattern.action.name || (pattern.stage ?? 'target') !== event.stage || event.canceled || !event.success) return false;
   // A lifetime reference was materialized with the contribution. `self` means
   // its source; `subj`/`obj` mean the target selected by the state phrase.
@@ -106,6 +110,11 @@ function lifetimeMatches(item: StoredRuleContribution, event: NormalizedEventRec
     : eventBindingMatches(actual, item.targetUnitId);
   if (pattern.subject.kind === 'reference' && !referenceMatches(pattern.subject.reference, event.subject)) return false;
   if (pattern.object?.kind === 'reference' && !referenceMatches(pattern.object.reference, event.object)) return false;
+  if (pattern.object?.kind === 'player') {
+    const owner = Number(item.sourceUnitId.slice(0, 1));
+    const player = pattern.object.player === 'you' ? owner : owner === 1 ? 2 : 1;
+    if (event.object?.kind !== 'player' || event.object.player !== player) return false;
+  }
   const parametersMatch = pattern.action.parameters.every((value, index) => value === undefined || value === event.parameters[index]);
   return parametersMatch && pattern.action.qualifiers.every(qualifier => event.qualifiers.includes(qualifier));
 }
@@ -132,9 +141,12 @@ function derivedForUnit(unit: UnitState, sources: readonly DerivedRuleSource[], 
     const sourceBinding: RuleBinding = { kind: 'unit', unitId: source.sourceUnitId };
     const sourceContext = { ...context, self: sourceBinding };
     if (source.rule.kind === 'continuous') {
-      if (source.sourceUnitId !== unitId(unit)) continue;
       const active = evaluateObservableCondition(source.rule.condition, sourceContext);
       if (!active.ok || !active.value) continue;
+      if (source.rule.distribution) {
+        result.push(...derivedForUnit(unit, [{ ...source, rule: source.rule.distribution }], context));
+        continue;
+      }
       const targets = selectStateTargetUnitIds(source.rule.contribution, sourceContext);
       if (!targets.ok || !targets.value.includes(unitId(unit))) continue;
       result.push({ id: -result.length - 1, sourceRuleId: source.id, sourceUnitId: source.sourceUnitId, targetUnitId: unitId(unit), property: source.rule.contribution.property, lifetime: { kind: 'permanent' }, createdByEventId: -1 });

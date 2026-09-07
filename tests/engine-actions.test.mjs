@@ -95,7 +95,7 @@ test('authoritative actions record normalized target and resolved lifecycle stag
   assert.deepEqual(deployed.normalizedEvents.filter(event => event.name === 'deploy').map(event => event.object), [
     { kind: 'hex', coordinate: '1,2' }, { kind: 'hex', coordinate: '1,2' }
   ]);
-  assert.equal(deployed.normalizedEvents[0].destination, '1,2');
+  assert.equal(deployed.normalizedEvents.find(event => event.name === 'deploy').destination, '1,2');
   assert.equal(deployed.rulesVersion, 3);
 });
 
@@ -108,7 +108,7 @@ test('delayed actions do not emit resolved at target time', () => {
   assert.deepEqual(attacked.normalizedEvents.filter(event => event.name === 'bow').map(event => [event.name, event.stage]), [['bow', 'target']]);
   const resolved = applyGameAction(attacked, 2, { type: 'pass' }, cards);
   assert.deepEqual(resolved.normalizedEvents.filter(event => event.name === 'bow' || event.name === 'pass').map(event => [event.name, event.stage]), [
-    ['bow', 'target'], ['pass', 'target'], ['bow', 'resolved'], ['pass', 'resolved']
+    ['bow', 'target'], ['pass', 'target'], ['pass', 'resolved'], ['bow', 'resolved']
   ]);
 });
 
@@ -407,7 +407,7 @@ test('Merino Ram can Gore across intervening Yak and Crane troops', () => {
   assert.equal(resolved.effects.some(effect => effect.kind === 'gore'), false);
 });
 
-test('Ironhide Boar Pup gains both temporary modifiers once per troop hit by Gore', () => {
+test('Ironhide Boar Pup gains permanent modifiers once per troop hit by Gore', () => {
   const state = {
     activePlayer: 2,
     units: [
@@ -421,7 +421,8 @@ test('Ironhide Boar Pup gains both temporary modifiers once per troop hit by Gor
   while (ready.pendingResolution) ready = applyGameAction(ready, 1, { type: 'resolve-pass', troopId: ready.pendingResolution.sourceTroopId }, cards);
   const resolved = applyGameAction(ready, 1, { type: 'pass' }, cards);
   const boar = resolved.units.find(unit => unit.troopId === 'ironhide-boar-pup');
-  assert.equal(boar?.shields?.reduce((sum, shield) => sum + shield.value, 0), 2);
+  assert.equal(boar?.shields, undefined);
+  assert.equal(boar?.combatModifierBonus, 2);
   assert.equal(boar?.magicModifierBonus, 2);
   assert.equal(resolved.normalizedEvents.filter(event => event.name === 'wound' && event.subject?.unitId === '2:ironhide-boar-pup').length, 2);
 });

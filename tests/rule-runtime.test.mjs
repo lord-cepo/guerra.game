@@ -16,7 +16,7 @@ function scenario(fast = false) {
     ],
     effects: [], bashes: [], bombs: [], normalizedEvents: [], ruleContributions: []
   };
-  const rule = parseRule(`o:opp move-from c:you : self ${fast ? 'F.' : ''}fire(2,_) subj`);
+  const rule = parseRule(`o:opp move-from c:you : must self ${fast ? 'F.' : ''}fire(2,_) subj`);
   const rules = [{ id: 'fixed-fire', sourceUnitId: '1:queen-bee', rule }];
   const pending = [];
   const hits = [];
@@ -67,7 +67,7 @@ test('all target policy freezes and emits one singular action per matching targe
       { id: '2:coastal-heron', troopId: 'coastal-heron', owner: 2, coordinate: '0,1', permanentDamage: 0 }
     ], effects: [], bashes: [], bombs: [], normalizedEvents: [], ruleContributions: []
   };
-  const rule = parseRule('self move _ : self F.fire(2,_) all o:opp');
+  const rule = parseRule('self move _ : must self F.fire(2,_) all o:opp');
   const targets = [];
   const result = executeNormalizedIntent(state, cards, [{ id: 'fanout', sourceUnitId: '1:queen-bee', rule }], {
     name: 'move', subject: { kind: 'unit', unitId: '1:queen-bee' }, object: { kind: 'hex', coordinate: '2,1' },

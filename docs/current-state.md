@@ -2,7 +2,81 @@
 
 This is a concise handoff, not a changelog. Update it when a feature group or architectural assumption changes.
 
+## Language extensions
+
+- Tests now reflect cost-based trigger choices, current catalogue rules, permanent
+  modifier storage, and selector-aware card text. Regression coverage includes
+  whole-group acceptance/skipping, serialization, tireless defaults, explicit
+  costs, and free bomb defusal. `bomb-defuse` now removes its targeted inert bomb.
+- Immobile non-flying troops retain `🥾0` in shared card/deck descriptions.
+  Runtime persistence serializes saves across instances sharing one file,
+  preventing overlapping backup/publish operations in the same process.
+
+- Triggered action defaults follow cost: bow, gore, bomb-throw, fire, cannon,
+  fly, move, shield, mshield, pull, push, and stun are optional unless tireless.
+  Tireless and other free consequences are mandatory by default. Explicit rule
+  costs make action consequences optional; explicit `must` overrides this.
+  Runtime and hover share the policy. Normal turn-action costs are unchanged.
+
+- Deck-builder card details share the match card formatter: movement ranges
+  follow their icons and explicit selectors replace internal maximum ranges.
+  Compact self-relative filtered ranges show the colored selector and distance
+  (for example White Wolf's enemy-colored `any 3`). Revive uses its word label.
+
+- Hover cards use background `#2b2a33` and a subtle divider between modifier
+  details and effect descriptions when both are present.
+
+- Optional triggered actions with explicit targets now pause for confirmation,
+  including a single target. `all` offers one Perform on all targets / Skip
+  choice; accepting executes the captured targets in order. Costs are paid
+  only after accepting the initial action. Mandatory fixed-target actions and
+  state changes remain automatic. Built without tests or browser verification
+  at the user's request.
+
+- Hover uses numeric range after action icons, “at the end, if …” phase guards,
+  and “you may”/“you must” for action consequences. Action updates list their
+  source unit names; modifier breakdowns show signed control, shield, and
+  per-source physical/magic contributions. Shield action values stay unsplit.
+  Tests and browser verification were skipped at the user's request.
+
+- `any`/`none`/`all` selector conditions work in trigger guards and continuous
+  conditions. `end if ...` reads current state when End fires; `all` requires
+  a nonempty base. Card descriptions preserve the explicit quantifier.
+  This addition was not tested or browser-verified at the user's request.
+
+- Catalogue actions and rules are authored together in `rules`; action targets
+  compile to selectors. Legacy action input/history remain compatible. `A`
+  omits token payment independently of `T` deactivation.
+- Typed hex/unit/player counters and flags, board complements, attack families
+  (`atk`, `patk`, `ratk`), and prefix `while condition : contribution` work.
+- `at next-start/end` and opponent variants persist concrete scheduled effects.
+  Triggered modifier grants emit events; continuous contributions stay silent.
+- Explicit triggered selectors offer target choices, retain bundle continuations
+  through saves, and resume through `resolve-rule`.
+- Focused tests: `tests/language-extensions.test.mjs` and `tests/action-costs.test.mjs`.
+
 ## Product state
+
+- Compact selectors retain colored `hero`, `side`, and `ctrl` labels when simple;
+  neutral control is white. Movement origin triggers retain `from`.
+  `bomb-light` lights an inert bomb and schedules damage; `bomb-explode` names
+  detonation (`bomb-explode-resolve` remains an alias).
+
+- Hex descriptions and hover text are generated from parsed rules. Simple targets
+  retain numbers or colored words; complex targets use `X` on the hex and expand
+  in hover. Hex text uses `w` for `while`, reserves three effect rows, and clips
+  overflowing rows with `...`; hover keeps complete text without action tutorials.
+  Coverage: `tests/compact-card-text.test.mjs`.
+
+- Explicit action costs and bundled event handling are implemented. `A & B :: C & D`
+  pays A/B before their triggers, then resolves C/D before their triggers.
+  `deactivate` pays troop activity, and binary `up-actions(N) you|opp` mutates
+  player tokens. Standalone actions spend one token in addition to their activity
+  cost; triggered actions pay activity only. Explicit costs replace defaults.
+  Heroes supply `start : self up-actions(1) you`, including before deployment.
+  Deployment enters inactive; the action phase continues until tokens reach zero.
+  Dashboard bundles, balances, and suspended rule work survive Playground save/load.
+  See `docs/rule-language.md` and `tests/action-costs.test.mjs`.
 
 - Browser turn-based strategy game with 8- and 10-card decks.
 - The server rulebook migration is complete. The normalized parser, pure
@@ -28,7 +102,7 @@ This is a concise handoff, not a changelog. Update it when a feature group or ar
   piercing semantics and the contributable `fast` passive makes it resolve
   immediately when either participant has Fast. Bombs expose observable
   `bomb-off`/`bomb-on` states; `bomb-throw` is the proper turn action,
-  `bomb-explode` is an engine consequence, and triggered `bomb-explode` or
+  `bomb-explode` is an engine consequence, and triggered `bomb-light` or
   `bomb-defuse` is forced without deactivating its source. The AST now feeds
   pure authoritative event matching, history evaluation, stored/effective
   state, and the first migrated catalogue rules. Canonical multi-field queries
@@ -44,7 +118,7 @@ This is a concise handoff, not a changelog. Update it when a feature group or ar
   (`bow(2,3)` equals `self bow(2) !o:you 3-from self`). Action consequences use
   their target selector as a choose-one policy by default, pausing for player
   choice when necessary; `all` freezes matching coordinates and expands them
-  into separate singular action occurrences. Bare consequences are optional;
+  into separate singular action occurrences. Costly consequences are optional;
   `must` removes the decline choice. Negated owner filters such as `!o:you` are
   accepted, and phase-trigger consequences that reference unbound `subj` or
   `obj` are rejected while parsing.
@@ -168,9 +242,9 @@ This is a concise handoff, not a changelog. Update it when a feature group or ar
 - Bash resolution sequences an applicable confirmed shield, slash/health countdown using only each participant's compact `♥ actual` value, and finally a slider that hides the defeated half. The surviving troop then returns to the normal single-card `actual ♥ starting` display; a tie hides both halves.
 - Static troop keywords use the structured `passives` list. First Strike, Obsidian, Titanium, and Steady share generated compact/full descriptions with their authoritative engine lookup, removing per-card boolean flags, hard-coded card IDs, and repeated keyword descriptions. In a First Strike bash, the enemy is slashed first; a surviving enemy retaliates with a second slash against the First Strike troop, while a defeated enemy deals no retaliation damage.
 - Triggered actions with no legal target are skipped automatically. Choices with at least one legal target open on their target action, highlight the legal hexes immediately, and can still be skipped with their button or Space. Saved playgrounds paused on a trigger restore its owner, source selection, and legal targets. Start triggers such as Frosthorn Yak's Pull resume the same player's normal action phase; resolving the action makes its source inactive, while skipping it does not. End/death triggers still complete the current turn after resolution. Trigger-specific prompts identify Pull, Stun, Revive, and attack choices instead of falling through to a Revive label.
-- A troop that performs a triggered action becomes inactive immediately, but its owner may still take the turn's normal action with another active troop. Inactivity is tracked per troop, so one trigger chain can make several troops inactive. Inactive troops do not produce action effects from triggers; non-action `mod`, `life`, and `maxlife` effects still trigger. Skipping an optional triggered action does not consume activity.
+- A triggered action pays activity before execution, without spending a normal action token. Inactivity is tracked per troop. Inactive sources still match triggers, but cannot pay another deactivation cost; resource/state changes and Tireless actions remain possible. Skipping an optional choice does not pay its costs.
 - At the very end of a player's turn, that player's troops become active again unless they became inactive during the turn just completed or during the immediately preceding opponent turn. The cleanup runs after End triggers, so an End-triggered action remains inactive. A troop that acts during the opponent's turn cannot act during its immediately following own turn.
-- A troop completing the normal action becomes inactive before End triggers are checked. In particular, deploying Wandering Monarch does not grant its optional End Move during that same deployment turn.
+- A normal action pays inactivity before its action event; cost triggers may reactivate it before execution. Deploying Wandering Monarch normally leaves it unable to pay its End Move's activity cost.
 - Triggered Move and Pull choices reuse the normal animated movement/bash preview and opponent confirmation playback. Triggered instant/death projectiles preview from their authoritative pending origin and damage, and triggered Stun animates on its staged target as well as after confirmation.
 - Frosthorn Pull presents an explicit troop chooser when both Bash participants share the selected hex. Tortoise Emperor shield playback includes newly deployed recipients, delayed behind opponent-visible deployment. Delayed Attack/Magic trajectories retain their recorded origin if the source disappears, and physical modifier overlays are suppressed as soon as their tracked target leaves the threatened hex or Bash.
 - While a pending triggered action is awaiting input, its living source troop is covered by a translucent yellow (`0.4` alpha) wash so the required actor remains visually identifiable.

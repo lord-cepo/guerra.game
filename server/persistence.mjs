@@ -2,6 +2,9 @@ import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/pro
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
+// Different Persistence instances can publish to the same file in one process.
+const runtimeWrites = new Map();
+
 export class Persistence {
   constructor(dataDirectory, matchStore, waitingPlayers, queuedMatches, { runtimeEnabled = true } = {}) {
     this.dataDirectory = dataDirectory;
@@ -17,7 +20,6 @@ export class Persistence {
     // same time. Serialize log writes so retention cannot unlink a file that
     // another writer is still using.
     this.matchLogQueue = Promise.resolve();
-    this.runtimeWriteQueue = Promise.resolve();
   }
 
   async loadRuntime() {
@@ -36,8 +38,11 @@ export class Persistence {
       waitingPlayers: [...this.waitingPlayers],
       queuedMatches: [...this.queuedMatches]
     }, null, 2);
-    const write = this.runtimeWriteQueue.then(() => this.#writeRuntime(payload));
-    this.runtimeWriteQueue = write.catch(() => {});
+    const key = process.platform === 'win32' ? this.runtimeFile.toLowerCase() : this.runtimeFile;
+    const write = (runtimeWrites.get(key) ?? Promise.resolve()).then(() => this.#writeRuntime(payload));
+    const settled = write.catch(() => {});
+    runtimeWrites.set(key, settled);
+    void settled.then(() => { if (runtimeWrites.get(key) === settled) runtimeWrites.delete(key); });
     return write;
   }
 

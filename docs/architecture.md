@@ -2,6 +2,11 @@
 
 ## Overview
 
+Quantified selector conditions are parsed by `game/rule-parser.ts` and evaluated
+against authoritative current state by `game/rule-evaluator.ts`. The existing
+trigger runtime checks guards only after their event anchor matches, so End
+guards inspect state at End. `client/card-rule-text.ts` displays the quantifier.
+
 Guerra is a browser-based, turn-based hex strategy game with deckbuilding. The runtime has four principal layers:
 
 ```text
@@ -26,6 +31,29 @@ See `docs/rule-engine-migration.md`.
 
 ## Source map
 
+Runtime persistence shares a per-file write queue across `Persistence` instances
+in one process, so rotating the backup and publishing a snapshot cannot overlap.
+The triggered-action executor handles inert-bomb defusal directly, and target
+choice validation uses that same execution path on a cloned state.
+
+Match snapshots include `ruleSources` from effective rule contributions, carrying
+the source unit's display name and property for hover action/modifier breakdowns.
+
+`rule-choice` also confirms optional actions whose targets are fixed. Its
+`allTargets` flag means acceptance executes every captured intent; Skip executes
+none. Accepted intents carry `confirmed` to prevent a second prompt. The server
+retains subsequent consequence work and defers initial costs until acceptance.
+
+The unified catalogue `rules` entries compile into action and rule indexes.
+`game/action-selector.ts` owns shorthand radius selectors and derived geometry
+bounds. `game/named-values.ts` owns typed, ownership-free attachment storage;
+`game/rule-scheduler.ts` owns serialized, once-only phase schedules. The runtime
+materializes recipients and grants, preserving effect bundles across target
+choices. Match snapshots and Playground saves retain `namedValues`,
+`scheduledRules`, and pending rule-choice intents. Clients submit
+`resolve-rule` using authoritative legal targets; the server pays costs and
+resumes the saved continuation.
+
 ### Game rules
 
 - `game/board.ts`
@@ -47,7 +75,9 @@ See `docs/rule-engine-migration.md`.
     distinct nodes. Action phrases default their subject to `self`; omitted
     targets delegate to the verb's normal legal-target rule, while explicit
     target selectors replace the final range shorthand. Triggered actions are
-    optional unless marked `must`.
+    optional when costly and mandatory when free; explicit `must` overrides
+    the default. `game/consequence-policy.ts` shares this policy with hover
+    descriptions and implicit triggered-action costs.
     `game/rule-vocabulary.ts`
     is the canonical dictionary for verbs, properties, phases, aliases, arity,
     timing/damage classes, and observable/contributable capabilities; it also
@@ -178,7 +208,7 @@ Stun is an immediate troop-targeted action. The authoritative unit stores `stunn
 Raven Prince uses the same stun resolution as an End trigger: its `End: 1🚫1` action opens an enemy-target selection when an enemy is in range, then records a normal authoritative stun effect unless the trigger is skipped.
 Triggered actions only enter the pending-resolution queue when they have a legal target. Targetless choices complete their stack row automatically; queued choices expose `resolve-pass`, while the client selects the first non-pass resolution action so its targets render immediately. Sandbox restoration seeds the pending source selection and follows the resolution owner rather than the underlying normal-turn player. A Start-trigger resolution records that it must resume the current player's normal action phase; resolving it makes its source inactive but still leaves the player free to take the normal action with another troop, while skipping it consumes no activity. End, death, and action-produced trigger choices still finish the turn after their queue is resolved or skipped.
 
-Activity is stored per deployed unit as the global turn on which it most recently performed an action, rather than inferred solely from the single legacy last-actor field. This permits several trigger sources to become inactive in one resolution chain. At the very end of a player's turn, only that player's troops are considered for reactivation: a troop stays inactive if it acted during the turn just completed or during the immediately preceding opponent turn, and older inactivity is cleared. Because cleanup follows End and opponent-End dispatch, an action performed in either End window is retained. A troop that acts during an opponent turn is therefore still inactive throughout its upcoming own turn. A troop that began a normal action while active may finish triggers caused directly by that action, then becomes inactive before the End trigger window opens; a newly deployed Wandering Monarch cannot perform its End Move during the deployment turn. Trigger dispatch suppresses later action effects from sources that were already inactive, but deliberately continues to resolve the non-action `modifier`, `life`, and `maxlife` status verbs.
+Activity is stored per unit as the global turn of its last deactivation. Costs deactivate sources before their action, including deployment while off board. At turn end, that player's troops retain inactivity from the current and immediately preceding opponent turn; older inactivity clears. Triggers still match inactive sources, but an action requiring another deactivation is unpayable. Resource changes and state grants can resolve, and a cost-triggered reactivation is preserved through the subsequent action.
 
 Defense animations follow that rule explicitly: local Defense/Self Defense waits for the target-selection echo before constructing its one-shot preview. On an authoritative revision, only the non-acting client constructs the confirmed shield playback, so the acting client does not see the preview repeated after confirmation. Defense, Magic Defense, and triggered `N mod P` effects all grant non-continuous modifiers. Their physical component is stored on the receiving `UnitState` as shield entries and their magic component as `magicModifierBonus`; they follow the troop and are consumed independently by the next physical or magic damage resolution of the matching kind. Presentation distinguishes their origin: Shield actions use shield frames, while `mod` status changes use a bottom-to-top `upgrade.png` reveal—grayscale for physical, original color for magic, and physical then magic when both increase. Performing an action does not consume either component. Continuous card effects and the live control modifier are derived during combat calculation and are never consumed.
 Explicit Magic Defense actions use the normal staged/confirmed Defense dispatcher with its purple magic flag. Snapshot differences identify triggered modifier gains independently from Shield actions, preventing numeric modifier changes from borrowing shield imagery or duplicating explicit Defense presentation.
@@ -227,6 +257,20 @@ Bash disappearance alone is not a combat-resolution signal: a defender can remov
 
 ## Turns and resolution
 
+`game/action-costs.ts` owns implicit cost expansion, whole-payment validation,
+off-board activity, and player-token mutations. `up-actions` uses player bindings
+rather than hexes. The engine supplies each hero's implicit Start token rule and
+separates command mutation from `finishActionChain`, which advances out of the
+action phase only after its balance reaches zero and pending work finishes.
+
+`game/rule-runtime.ts` captures member triggers at event time and releases them
+after all mutations in the ordered bundle. `A & B :: C & D` therefore executes
+`A B A1 B1 C D C1 D1`. Explicit payment replaces implicit costs. Dashboard rows
+carry ordered bundle members; `ruleWork` stores remaining consequences and
+captured triggers, and `paidCommand` retains a command suspended by a cost-trigger
+choice. These fields and player `actions` balances are preserved by match
+snapshots, Playground restoration, undo, and semantic preview cloning.
+
 A newly created bash is ineligible for combat until an End phase completes. It then resolves in the first subsequent `combat-resolve` phase, regardless of which participant owns that turn. This makes Start-trigger bashes wait through the current player's action and End phase, giving the following player an action in which either participant they control may flee. A bash created by an End-trigger choice becomes eligible when that same End phase finishes and resolves after the following player's action. Legacy persisted bashes without the lifecycle marker are treated as already eligible.
 
 The main phases are documented in `README.md`:
@@ -241,7 +285,7 @@ Effects, bashes, bombs, triggers, and optional choices can survive across phases
 
 Normalized triggers use post-event timing. The runtime captures matching rules
 when an event occurs, applies the authoritative mutation, performs its
-`removed-after` cleanup, and then executes the captured consequences before the
+`removed-after` cleanup, finishes the remaining bundle members, and executes captured consequences before the
 engine advances to combat, End, or the next Start phase. The later
 `A-resolved` record remains a distinct notification and follows the same
 capture-then-fire rule. Runtime rule sources retain a last-known unit snapshot,
@@ -265,6 +309,11 @@ Local state lives under `data/`:
 Live-match runtime loading and saving is temporarily disabled at server construction, so restarting the process starts with no active matches or matchmaking queue. Existing runtime files remain untouched for reversibility. User decks, saved Playground checkpoints, and the ten retained diagnostic match logs continue to persist independently. The dormant runtime implementation bounds per-match diagnostics to 100 compact entries without repeated histories and retains its atomic primary/backup write path for when recovery is re-enabled.
 
 ## Testing
+
+`client/card-rule-text.ts` generates compact and hover descriptions from the same
+parsed rules; `rule-selector-text.ts` controls target abbreviation. Card sources
+do not need duplicate description arrays. `board-descriptions.ts` applies the
+three-row layout and `svg-text-fit.ts` fits text to the rendered frame width.
 
 - Engine coverage is split by domain: `tests/engine-catalogue-triggers.test.mjs`, `tests/engine-deployment-control.test.mjs`, `tests/engine-combat.test.mjs`, `tests/engine-actions.test.mjs`, and `tests/engine-effects.test.mjs`. Each file creates an isolated card map through `tests/helpers/engine-fixture.mjs`, so fixture mutations cannot leak between domains.
 - `tests/match-store.test.mjs` covers authoritative match transitions.

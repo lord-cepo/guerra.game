@@ -52,6 +52,8 @@ node -e "const fs=require('fs'); JSON.parse(fs.readFileSync('data/runtime.json',
 
 ## Implementation rules
 
+- Keep files small by separating different mechanics into different files with clear responsibilities and small interfaces.
+- Prefer fewer lines of code when possible, while preserving readability, correctness, and useful separation of responsibilities. Avoid compressed formatting or clever shortcuts solely to reduce line count.
 - Treat the server as authoritative. Local previews may project state, but confirmed actions must come from server state.
 - Avoid rendering the same preview both optimistically and again on the WebSocket selection echo; this restarts CSS/Web Animations and causes visible glitches.
 - Keep complete troop visuals rigid during motion. Artwork, info frame, health, modifier, and description should share one moving SVG group unless a deliberate layer must remain fixed.
@@ -79,6 +81,18 @@ The board has one shared horizontal orientation for both players and is not glob
 - Check hover entry, hover exit, direct side-to-side movement, confirmation, cancellation, and re-render behavior.
 - Check the browser console for runtime errors.
 - Run `git diff --check` before handing off.
+
+## Efficient task execution
+
+- Search for specific symbols with `rg`, then read bounded sections of relevant files instead of repeatedly reading entire files.
+- Keep a concise working map of inspected files, decisions, and verification results; reuse it instead of repeating investigation unless the code or evidence changes.
+- Keep tool output small. Save verbose logs to files and retrieve failure details and summaries; request browser snapshots scoped to the relevant controls.
+- Run focused tests while editing, then run the required broader checks once before handoff. Repeat checks only after relevant changes, failures, or unresolved concerns.
+- Investigate pre-existing failures once and record the evidence and reproduction command so later tasks can distinguish them from regressions. Recheck when relevant code or environment changes.
+- Keep architecture and lifecycle references concise, including execution order, continuation state, and the files responsible for each mechanic when relevant.
+- Give tests descriptive names and provide focused test commands for complex mechanics when useful.
+- Avoid speculative cleanup, unrelated fixes, and incidental refactoring. Make larger structural refactors deliberate tasks unless necessary for the requested change.
+- Reduce redundant work and output without skipping required verification or leaving the requested work incomplete.
 
 ## Working tree safety
 

@@ -180,7 +180,7 @@ function renderServerMatchState(match: ServerMatchState): void {
   if (state.serverSelectedTroopId && selectedActions.length > 0 && (!state.serverSelectedAction || !actionTypes.has(state.serverSelectedAction))) {
     // Pending choices always include resolve-pass first, but the board should
     // open on the actual target action so legal hexes are visible immediately.
-    state.serverSelectedAction = (['deploy', 'resolve-move', 'resolve-death-attack', 'resolve-instant-ranged', 'resolve-instant-magic', 'resolve-stun', 'resolve-pull', 'move', 'fly'] as const)
+    state.serverSelectedAction = (['deploy', 'resolve-rule', 'resolve-move', 'resolve-death-attack', 'resolve-instant-ranged', 'resolve-instant-magic', 'resolve-stun', 'resolve-pull', 'move', 'fly'] as const)
       .find(type => actionTypes.has(type))
       ?? selectedActions.find(action => action.type !== 'resolve-pass')?.type
       ?? selectedActions[0]?.type;

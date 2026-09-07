@@ -137,7 +137,7 @@ test('Phoenix Moth death pauses for a 3-damage ranged target within distance 2',
   assert.equal(resolved.activePlayer, 1);
 });
 
-test('Temple of the Last Bell resolves its two instant ranged choices', () => {
+test('Temple of the Last Bell resolves its single instant ranged choice', () => {
   const state = { activePlayer: 2, units: [
     { id: '1:powder-newt', troopId: 'powder-newt', owner: 1, coordinate: '1,0', permanentDamage: 0 },
     { id: '2:temple-last-bell', troopId: 'temple-last-bell', owner: 2, coordinate: '1,1', permanentDamage: 0 }
@@ -148,13 +148,12 @@ test('Temple of the Last Bell resolves its two instant ranged choices', () => {
   assert.equal(availableActionsFor(death, 2, 'temple-last-bell', cards).some(action => action.type === 'resolve-pass'), true);
   const first = applyGameAction(death, 2, { type: 'resolve-instant-ranged', troopId: 'temple-last-bell', coordinate: '1,0' }, cards);
   assert.equal(first.units.some(unit => unit.troopId === 'powder-newt'), false);
-  assert.equal(first.pendingResolution?.kind, 'instant-ranged');
-  const finished = applyGameAction(first, 2, { type: 'resolve-pass', troopId: 'temple-last-bell' }, cards);
+  const finished = first;
   assert.equal(finished.pendingResolution, undefined);
   assert.equal(finished.activePlayer, 1);
 });
 
-test('triggered physical and magic modifiers use temporary shield storage', () => {
+test('permanent bash modifiers accumulate on the unit without temporary shields', () => {
   const state = { activePlayer: 1, units: [
     { id: '1:boar-warlord', troopId: 'boar-warlord', owner: 1, coordinate: '1,1', permanentDamage: 0 },
     { id: '2:coastal-heron', troopId: 'coastal-heron', owner: 2, coordinate: '1,0', permanentDamage: 0 }
@@ -162,8 +161,9 @@ test('triggered physical and magic modifiers use temporary shield storage', () =
   const moved = applyGameAction(state, 1, { type: 'move', troopId: 'boar-warlord', coordinate: '1,0' }, cards);
   assert.equal(moved.bashes.length, 1);
   const boar = moved.units.find(unit => unit.troopId === 'boar-warlord');
-  assert.deepEqual(boar?.shields?.map(shield => shield.value), [1], 'entering a bash grants a temporary +1 physical modifier');
-  assert.equal(boar?.magicModifierBonus, 1, 'entering a bash grants +1 magic modifier');
+  assert.equal(boar?.shields, undefined, 'permanent modifiers are not temporary shields');
+  assert.equal(boar?.combatModifierBonus, 1);
+  assert.equal(boar?.magicModifierBonus, 1);
 });
 
 test('performing an action no longer consumes a physical modifier', () => {
@@ -260,11 +260,12 @@ test('a bomb stays inert until fire magic lights its delayed neutral seven-hex e
   const thrown = applyGameAction(state, 1, { type: 'bomb', troopId: 'bombardier-beetle', coordinate: '1,-1' }, cards);
   assert.deepEqual(thrown.bombs, [{ owner: 1, sourceTroopId: 'bombardier-beetle', coordinate: '1,-1', damage: 2 }]);
   assert.deepEqual(thrown.effects, [], 'throwing the bomb causes no damage');
-  const repeatedThrow = { ...thrown, activePlayer: 1, lastActingTroopId: {}, units: thrown.units.map(unit => ({ ...unit, inactiveOnTurn: undefined, inactiveUntilTurn: undefined })) };
+  const repeatedThrow = { ...thrown, activePlayer: 1, actions: { 1: 1, 2: 0 }, lastActingTroopId: {}, units: thrown.units.map(unit => ({ ...unit, inactiveOnTurn: undefined, inactiveUntilTurn: undefined })) };
   const merged = applyGameAction(repeatedThrow, 1, { type: 'bomb', troopId: 'bombardier-beetle', coordinate: '1,-1' }, cards);
   assert.deepEqual(merged.bombs, [{ owner: 1, sourceTroopId: 'bombardier-beetle', coordinate: '1,-1', damage: 4 }], 'a bomb thrown onto an occupied bomb hex merges by summing damage');
 
-  const lit = applyGameAction(thrown, 2, { type: 'magic', troopId: 'squirrel-king', coordinate: '1,-1' }, cards);
+  // This fixture has two heroes on Blue; constrain this response to one token.
+  const lit = applyGameAction({ ...thrown, actions: { ...thrown.actions, 2: 1 } }, 2, { type: 'magic', troopId: 'squirrel-king', coordinate: '1,-1' }, cards);
   assert.deepEqual(lit.bombs, [], 'the lit bomb is removed immediately');
   assert.equal(lit.effects.filter(effect => effect.kind === 'bomb').length, 7);
   assert.equal(lit.units.find(unit => unit.id === '2:tiger-queen').permanentDamage, 0, 'ignition itself causes no damage');

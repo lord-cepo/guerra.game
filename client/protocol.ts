@@ -17,6 +17,7 @@ export interface ServerLegalAction {
 }
 
 export interface ServerUnitState {
+  ruleSources?: Array<{ sourceName: string; property: import('../game/rule-parser.js').RuleStateProperty }>;
   id: string;
   troopId: string;
   owner: Player;
@@ -125,6 +126,7 @@ export interface ServerMatchState {
   lastActingTroopId?: Partial<Record<Player, string>>;
   turnCounts?: Partial<Record<Player, number>>;
   turnNumber?: number;
+  actions?: Partial<Record<Player, number>>;
   selections?: Partial<Record<Player, string>>;
   targetSelections?: Partial<Record<Player, ServerTargetSelection>>;
   legalActions?: Partial<Record<Player, ServerLegalAction[]>>;

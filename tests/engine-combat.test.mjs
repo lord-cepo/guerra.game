@@ -286,7 +286,7 @@ test('magic ignores shields and kills when current health is at or below its dam
 test('movement cannot enter the center hex or exceed the troop movement range', () => {
   const state = { activePlayer: 1, units: [{ troopId: 'tiger-queen', owner: 1, coordinate: '1,1', permanentDamage: 0 }], effects: [], bashes: [] };
   assert.throws(() => applyGameAction(state, 1, { type: 'move', troopId: 'tiger-queen', coordinate: '0,0' }, cards), /Invalid hex/);
-  assert.throws(() => applyGameAction(state, 1, { type: 'move', troopId: 'tiger-queen', coordinate: '-3,0' }, cards), /free path/);
+  assert.throws(() => applyGameAction(state, 1, { type: 'move', troopId: 'tiger-queen', coordinate: '-3,0' }, cards), /selector/);
 });
 
 test('movement cannot enter a hex occupied by a friendly troop', () => {
@@ -595,7 +595,7 @@ test('self block creates exactly 1 shield on the acting troop', () => {
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const next = applyGameAction(state, 2, { type: 'self-defense', troopId: 'river-otter' }, cards);
   assert.deepEqual(next.units.find(unit => unit.troopId === 'river-otter')?.shields, [{ value: 1, sourceUnitId: '2:river-otter' }]);
-  assert.equal(combatBreakdown(next, 'river-otter', cards).modifier, 1);
+  assert.equal(combatBreakdown(next, 'river-otter', cards).modifier, 2);
 });
 
 test('River Otter receives +1 only when another troop shields it', () => {
@@ -644,15 +644,16 @@ test('War Temple have rule grants its modifier only to each friendly bashing uni
   assert.deepEqual(idleRules, []);
 });
 
-test('Marsh Badger loses one shield modifier when shielded', () => {
+test('Marsh Badger has a minus-two modifier while shielded', () => {
   const state = { activePlayer: 1, units: [
     { troopId: 'marsh-badger', owner: 1, coordinate: '1,0', permanentDamage: 0 },
     { troopId: 'squirrel-king', owner: 2, coordinate: '2,0', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const shielded = applyGameAction(state, 1, { type: 'self-defense', troopId: 'marsh-badger' }, cards);
   const breakdown = combatSummary(shielded, 'marsh-badger', cards);
-  assert.equal(breakdown.modifiers.find(entry => entry.label === 'Rules')?.value, -1);
-  assert.equal(breakdown.modifier, 1, 'the shield and penalty cancel while friendly control still adds one');
+  assert.equal(breakdown.modifiers.find(entry => entry.label === 'Rules')?.value, -2);
+  assert.equal(breakdown.modifier, -1, 'one shield offsets half the minus-two penalty');
+  assert.notEqual(breakdown.controller, 1, 'the reduced strength does not secure friendly control');
 });
 
 test('Squirrel King does not heal when another troop acts', () => {
@@ -674,7 +675,7 @@ test('Squirrel King heals after it personally uses magic and records normalized 
   const afterP2 = applyGameAction(afterP1, 2, { type: 'magic', troopId: 'squirrel-king', coordinate: '-1,0' }, cards);
   assert.equal(afterP2.units.find(unit => unit.troopId === 'squirrel-king')?.permanentDamage, 1);
   assert.ok(afterP2.normalizedEvents?.some(event => event.name === 'fire' && event.stage === 'target'));
-  assert.deepEqual(afterP2.normalizedEvents?.slice(-4).map(event => event.name), ['end', 'opponent-end', 'start', 'opponent-start']);
+  assert.deepEqual(afterP2.normalizedEvents?.filter(event => ['end', 'opponent-end', 'start', 'opponent-start'].includes(event.name)).slice(-4).map(event => event.name), ['end', 'opponent-end', 'start', 'opponent-start']);
 });
 
 test('normalized bash events bind the exact attacker, defender, and fixed hex on retreat', () => {

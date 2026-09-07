@@ -2,6 +2,8 @@ import { hexDistance, PLAYABLE_COORDINATES, regionAt, type Coordinate } from './
 import { controlSummary, isUnitInactive, maximumHealth, unitId, type GameState, type UnitId, type UnitState } from './engine.js';
 import { hasPassive, type TroopSeed } from './cards.js';
 import type { Player } from './types.js';
+import { readNamedValue, type NamedValue } from './named-values.js';
+import { matchesEventName } from './rule-vocabulary.js';
 import type {
   PackedRuleAction, RuleBoundReference, RuleCondition, RuleDescriptor,
   RuleDirectedSelection, RuleEntity, RuleFieldQuery, RuleHistoricalCondition,
@@ -9,10 +11,12 @@ import type {
 } from './rule-parser.js';
 
 export type RuleBinding =
+  | { kind: 'player'; player: Player }
   | { kind: 'unit'; unitId: UnitId }
   | { kind: 'hex'; coordinate: Coordinate };
 
 export interface NormalizedEventRecord {
+  named?: NamedValue;
   id: number;
   name: string;
   stage: 'target' | 'resolved';
@@ -64,7 +68,7 @@ function findUnit(state: GameState, id: UnitId): UnitState | undefined {
 }
 
 function coordinateOf(binding: RuleBinding, context: RuleEvaluationContext): Coordinate | undefined {
-  return binding.kind === 'hex' ? binding.coordinate : findUnit(context.state, binding.unitId)?.coordinate;
+  return binding.kind === 'hex' ? binding.coordinate : binding.kind === 'unit' ? findUnit(context.state, binding.unitId)?.coordinate : undefined;
 }
 
 function binding(context: RuleEvaluationContext, reference: RuleBoundReference['reference']): RuleBinding | undefined {
@@ -147,7 +151,7 @@ function queryMatches(query: RuleFieldQuery, coordinate: Coordinate, context: Ru
 }
 
 function directedMatches(selection: RuleDirectedSelection, coordinate: Coordinate, reference: Coordinate, subject: Coordinate): boolean {
-  if (selection.direction === 'range-from') return hexDistance(coordinate, reference) === selection.distance;
+  if (selection.direction === 'range-from') return selection.within ? hexDistance(coordinate, reference) <= (selection.distance ?? 0) : hexDistance(coordinate, reference) === selection.distance;
   if (selection.distance !== undefined && hexDistance(coordinate, subject) !== selection.distance) return false;
   const candidateDistance = hexDistance(coordinate, reference);
   const subjectDistance = hexDistance(subject, reference);
@@ -157,6 +161,24 @@ function directedMatches(selection: RuleDirectedSelection, coordinate: Coordinat
 }
 
 export function selectRuleHexes(entity: RuleEntity, context: RuleEvaluationContext): RuleEvaluationResult<Coordinate[]> {
+  if (entity.kind === 'complement') {
+    const selected = selectRuleHexes(entity.operand, context);
+    return selected.ok ? ok(PLAYABLE_COORDINATES.filter(hex => !selected.value.includes(hex))) : selected;
+  }
+  if (entity.kind === 'intersection') {
+    let hexes = [...PLAYABLE_COORDINATES];
+    for (const operand of entity.operands) {
+      const selected = selectRuleHexes(operand, context);
+      if (!selected.ok) return selected;
+      hexes = hexes.filter(hex => selected.value.includes(hex));
+    }
+    return ok(hexes);
+  }
+  if (entity.kind === 'named') return ok(PLAYABLE_COORDINATES.filter(coordinate => {
+    const bindings: RuleBinding[] = entity.scope === 'hex' ? [{ kind: 'hex', coordinate }] : occupantsAt(context, coordinate).map(unit => ({ kind: 'unit', unitId: unitId(unit) }));
+    return bindings.some(binding => readNamedValue(context.state, binding, entity.named.name, typeof entity.named.value === 'boolean') === entity.named.value);
+  }));
+  if (entity.kind === 'player') return fail('invalid-query', 'A player is not a board hex.');
   if (entity.kind === 'wildcard') return ok([...PLAYABLE_COORDINATES]);
   if (entity.kind === 'reference') {
     const found = binding(context, entity.reference);
@@ -234,7 +256,25 @@ function stateMatchesUnit(state: RuleState, unit: UnitState, objectHexes: readon
   }
 }
 
-export function evaluateRuleState(state: RuleState, context: RuleEvaluationContext): RuleEvaluationResult<boolean> {
+function quantify(matches: boolean[], quantifier: 'any' | 'none' | 'all'): boolean {
+  return quantifier === 'none' ? !matches.some(Boolean) : quantifier === 'all' ? matches.length > 0 && matches.every(Boolean) : matches.some(Boolean);
+}
+
+export function evaluateRuleState(state: RuleState, context: RuleEvaluationContext, quantifier?: 'any' | 'none' | 'all'): RuleEvaluationResult<boolean> {
+  if (state.property.named) {
+    const named = state.property.named;
+    const scope = state.property.name.split('-')[0];
+    let targets: RuleBinding[];
+    if (scope === 'player') {
+      if (state.subject.kind !== 'player') return fail('invalid-query', 'Player state requires you or opp.');
+      targets = [{ kind: 'player', player: state.subject.player === 'you' ? context.controller : opponent(context.controller) }];
+    } else {
+      const selected = selectRuleHexes(state.subject, context);
+      if (!selected.ok) return selected;
+      targets = scope === 'hex' ? selected.value.map(coordinate => ({ kind: 'hex', coordinate })) : context.state.units.filter(unit => selected.value.includes(unit.coordinate)).map(unit => ({ kind: 'unit', unitId: unitId(unit) }));
+    }
+    return ok(quantify(targets.map(target => readNamedValue(context.state, target, named.name, typeof named.value === 'boolean') === named.value), quantifier ?? 'any'));
+  }
   if (state.property.name === 'bomb-off' || state.property.name === 'bomb-on') {
     const selected = selectRuleHexes(state.subject, context);
     if (!selected.ok) return selected;
@@ -242,13 +282,13 @@ export function evaluateRuleState(state: RuleState, context: RuleEvaluationConte
       ? context.state.bombs?.some(bomb => bomb.coordinate === hex) ?? false
       : context.state.effects.some(effect => effect.kind === 'bomb' && effect.origin === hex));
     const selector = state.subject.kind === 'descriptor' || state.subject.kind === 'query' ? state.subject.selector : 'any';
-    return ok(selector === 'none' ? !matches.some(Boolean) : selector === 'all' ? matches.length > 0 && matches.every(Boolean) : matches.some(Boolean));
+    return ok(quantify(matches, quantifier ?? selector));
   }
   if ((state.property.name === 'defeated' || state.property.name === 'undeployed') && state.subject.kind === 'reference') {
     const selected = binding(context, state.subject.reference);
     if (!selected || selected.kind !== 'unit') return ok(false);
     const onBoard = Boolean(findUnit(context.state, selected.unitId));
-    return ok(state.property.name === 'defeated' ? context.state.defeatedTroopIds?.includes(selected.unitId) ?? false : !onBoard);
+    return ok(quantify([state.property.name === 'defeated' ? context.state.defeatedTroopIds?.includes(selected.unitId) ?? false : !onBoard], quantifier ?? 'any'));
   }
   const units = selectedUnits(state.subject, context);
   if (!units.ok) return units;
@@ -256,12 +296,14 @@ export function evaluateRuleState(state: RuleState, context: RuleEvaluationConte
   if (!objectHexes.ok) return objectHexes;
   const matches = units.value.map(unit => stateMatchesUnit(state, unit, objectHexes.value, context));
   const selector = state.subject.kind === 'descriptor' || state.subject.kind === 'query' ? state.subject.selector : 'any';
-  return ok(selector === 'none' ? !matches.some(Boolean) : selector === 'all' ? matches.length > 0 && matches.every(Boolean) : matches.some(Boolean));
+  return ok(quantify(matches, quantifier ?? selector));
 }
 
 function bindingMatches(pattern: RuleEntity | undefined, actual: RuleBinding | undefined, context: RuleEvaluationContext): boolean {
   if (!pattern) return actual === undefined;
   if (!actual) return false;
+  if (pattern.kind === 'player') return actual.kind === 'player' && actual.player === (pattern.player === 'you' ? context.controller : opponent(context.controller));
+  if (pattern.kind === 'wildcard') return true;
   if (pattern.kind === 'reference') {
     const expected = pattern.reference === 'self' ? context.self : pattern.reference === 'subj' ? context.subj : context.obj;
     if (!expected) return false;
@@ -278,7 +320,8 @@ function bindingMatches(pattern: RuleEntity | undefined, actual: RuleBinding | u
 }
 
 function eventMatches(pattern: RulePhrase, event: NormalizedEventRecord, context: RuleEvaluationContext): boolean {
-  if (!event.success || event.canceled || event.name !== pattern.action.name) return false;
+  if (!event.success || event.canceled || !matchesEventName(pattern.endpoint && pattern.action.name === 'gore' ? 'gore-move' : pattern.action.name, event.name)) return false;
+  if (pattern.action.named && (pattern.action.named.name !== event.named?.name || pattern.action.named.value !== event.named?.value)) return false;
   if ((pattern.stage ?? 'target') !== event.stage) return false;
   if (pattern.action.parameters.length && pattern.action.parameters.some((value, index) => value !== undefined && value !== event.parameters[index])) return false;
   if (pattern.action.qualifiers.some(qualifier => !event.qualifiers.includes(qualifier))) return false;
@@ -300,6 +343,11 @@ export function evaluateHistoricalCondition(condition: RuleHistoricalCondition, 
 }
 
 export function evaluateObservableCondition(condition: RuleObservableCondition, context: RuleEvaluationContext): RuleEvaluationResult<boolean> {
+  if (condition.kind === 'selector-condition') {
+    if (condition.selector.kind === 'state') return evaluateRuleState(condition.selector, context, condition.quantifier);
+    const selected = selectRuleHexes(condition.selector, context);
+    return selected.ok ? ok(condition.quantifier === 'none' ? selected.value.length === 0 : selected.value.length > 0) : selected;
+  }
   if (condition.kind === 'history') return evaluateHistoricalCondition(condition, context);
   if (condition.kind === 'state') return evaluateRuleState(condition, context);
   const values: boolean[] = [];

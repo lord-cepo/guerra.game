@@ -11,6 +11,76 @@ The implementation and catalogue rollout plan is tracked in
 
 ## Semantic model
 
+### Unified entries and selectors
+
+Cards author actions, triggers, and continuous rules together in `rules`.
+An entry without a trigger separator or `have`/`while` is a standalone action
+or comma-separated action list. Legacy `actions` input remains accepted.
+Compiled actions and triggers are separate execution indexes. Actions compile
+to selectors: `bow(2,3)` selects within three hexes; `bow(2) o:opp 3-from self`
+selects enemy-occupied hexes exactly three away. Occupancy, paths, and normal
+action legality still apply. Geometry/presentation adapters derive numeric
+bounds from selectors; legacy persisted rows can still contain `range`.
+
+`A` omits the implicit standalone token cost; `T` omits deactivation. They
+combine independently. `A.move o:opp 3-from self` deactivates its source and
+must enter an enemy-occupied hex, starting Bash.
+
+### Named values and complements
+
+```text
+start : up-player-counter(cherry, -2) you
+start : up-unit-counter(cherry, 1) self
+gore-to !hex-flag(gored,on) : up-actions(1) you & up-hex-flag(gored,on) self
+end : up-hex-flag(gored,off) all _
+```
+
+`up-{hex|unit|player}-counter(name, delta)` adds a signed integer (default zero).
+`up-{hex|unit|player}-flag(name, on|off)` assigns a Boolean (default off).
+Names are lowercase identifiers with optional digits/hyphens. Counters and
+flags have separate namespaces. Hex attachments have no ownership; unit
+attachments follow stable unit IDs. Player attachments target exactly `you`
+or `opp`, never positional hex queries. Assignment events retain the source
+troop and typed recipient. Values persist through match and Playground saves.
+
+Inspect values with selectors such as `hex-flag(gored,on)` or
+`unit-counter(cherry,2)`, or guards such as `you player-counter(cherry,2)`.
+`!` complements a selector against every playable board hex, including empty
+hexes. Parenthesize compounds: `!(o:you adj self)`. Consecutive filters
+intersect: `o:opp !hex-flag(gored,on)`. `all` applies to every selected target;
+otherwise a multi-target action asks for one authoritative choice.
+
+### Timing and continuous contributions
+
+```text
+move-from c:opp : up-actions(1) you at next-start
+end : up-mod(1,1) at next-start until next-end
+while wounded : up-mod(1,1)
+while !active : o:you adj self have up-bow(1,1)
+```
+
+`at next-start`, `at next-end`, `at next-opponent-start`, and
+`at next-opponent-end` schedule one application at the next matching phase.
+Schedules stack, capture concrete recipients, survive source removal/reload,
+and are removed before execution to prevent replay. Scheduled actions pay
+their activity cost when executed. State contributions may also have a
+lifetime: `until next-end` expires at the owner's first End after application.
+Instant counter mutations have timing but no duration.
+
+`while condition : contribution` maintains a state contribution, optionally
+distributed through `have`. Enabling/recalculating it emits no grant event.
+Triggered `up-mod` and other `up-*` state grants emit events with granting
+troop as subject and recipient as object. Their reactions respect bundle
+ordering. `up-actions` and named counter/flag mutations are events, not
+maintained contributions; a continuous rule cannot mint spendable tokens.
+
+### Attack families
+
+`atk` matches `fire`, `cannon`, `gore-attack`, `bash`, and `bow`; `patk` matches
+`gore-attack`, `bash`, and `bow`; `ratk` matches `fire` and `cannon`. These are
+event patterns, not executable attacks, and retain the concrete event's
+bindings. Bomb events match none. `gore-from`/`gore-to` inspect Gore movement.
+
 A rule is either triggered or derived:
 
 ```text
@@ -54,6 +124,70 @@ This grants `+1` to every friendly unit adjacent to each friendly unit that is
 bashing an opponent. If ownership is irrelevant, the inner selector may be
 written `adj self`. An event is one-time and cannot be attached with `have`;
 engine-owned observations such as `wounded` cannot be contributed.
+
+## Costs, action tokens, and ordered bundles
+
+```text
+effect = [cost (" & " cost)* " :: "] consequence (" & " consequence)*
+cost   = singular-reference " deactivate " singular-reference
+       | [singular-reference] " up-actions(" negative-integer ") " player
+player = you | opp
+```
+
+An explicit `::` payment replaces implicit costs. Printed active actions accept
+a cost clause before their action; triggered rules accept a cost clause before
+their consequence bundle. Costs have no lifetime, target choice, or `must`.
+
+Bow, Fire, Cannon, Gore movement, Move, Fly, Shield, Mshield, Bomb Throw, Push,
+Pull, Upgrade, and Deploy implicitly pay `self deactivate self`. Mend, Stun,
+and Light also retain their activity cost. Tireless removes this implicit
+deactivation. A standalone action additionally pays `self up-actions(-1) you`;
+a triggered action does not spend its player's token unless explicitly required.
+Repeated implicit deactivation of the same source within one bundle is paid once.
+
+```text
+bow(3,2)
+// standalone expansion:
+self deactivate self & self up-actions(-1) you :: self bow(3) !o:you 2-from self
+```
+
+`up-actions(N)` is a binary **verb**, not an `up-*` state contribution. Its
+subject records the troop responsible; its object is exclusively `you` or
+`opp`, relative to the rule owner. It accepts one signed integer and changes
+that player's stored token balance once, never below zero. Players are distinct
+event bindings with no board coordinate; player targets cannot be replaced by
+hex queries, `_`, or `all`. Token changes can anchor ordinary/resolved triggers.
+
+Every hero has the engine-supplied rule `start : self up-actions(1) you`.
+It also applies before that hero deploys. Match creation dispatches the first
+Start; older snapshots without balances receive the legacy one-token action
+window when restored. Unused or additionally granted tokens remain stored.
+After an action chain finishes, the action phase continues while its player has
+tokens and advances to combat/End only at zero. Pass spends one token.
+
+Undeployed units are active. Deploy deactivates its source while off board,
+then puts the inactive unit on its destination. Reactivation during payment
+is preserved; execution never reapplies the cost afterward.
+
+The player chooses a legal target before payment. The engine validates the
+complete payment and commits it without allowing triggers between its members.
+An unpayable action cannot be confirmed. Preview/cancellation spends nothing.
+If cost triggers invalidate an already-paid action, it fizzles without refund.
+
+`&` groups ordered events: apply every member, then execute their captured
+triggers in member order. Nested trigger consequences finish before the next
+trigger. The cost bundle is a boundary before the action bundle:
+
+```text
+A & B :: C & D
+A B -> A1 B1 -> C D -> C1 D1
+```
+
+Each trigger's bindings and guard are captured at its own event occurrence;
+its execution waits for the bundle. Dashboard rows retain the ordered bundle
+members. Pending choices preserve remaining consequences and deferred triggers
+in serializable runtime work so save/load and reconnection retain the order.
+Delayed attacks still create pending attacks; damage resolves in its later window.
 
 ## States and conditions
 
@@ -136,7 +270,12 @@ Likewise, `move(1)` uses Move's default target selector and expands to
 `self move !o:opp 1-from self`. Active card actions use the same function form,
 for example `move(2), bow(3,4), shield(2,1)`.
 
-Actions and triggered action consequences are optional by default. Prefixing a
+Triggered bow, gore, bomb-throw, fire, cannon, fly, move, shield, mshield, pull,
+push, and stun consequences are optional by default because they cost activity.
+Tireless versions and all other free consequences (including revive and
+bomb-defuse) are mandatory by default. Explicit rule costs make action
+consequences optional even when tireless. Normal turn-action costs are unchanged.
+The runtime and hover share `game/consequence-policy.ts`. Prefixing a
 consequence with `must` removes the player's decline choice when at least one
 legal target exists:
 
@@ -199,8 +338,8 @@ No leading `all` is needed: `have` already distributes over the complete
 selector result. Phase anchors bind neither `subj` nor `obj`, so using `obj` in
 the preceding lifetime would be rejected.
 
-Each `&`-separated consequence owns its lifetime. Grouped shared lifetimes and
-explicit simultaneous-versus-ordered effect syntax are not accepted yet.
+Each `&`-separated consequence owns its lifetime. Shared lifetimes are not
+accepted; bundle mutation/trigger ordering is defined above.
 
 ## Selectors, queries, and bindings
 
@@ -294,6 +433,15 @@ tests whether selector `S` is non-empty; `none S` tests whether it is empty.
 `all Q P` requires a non-empty base query `Q` and tests whether every candidate
 satisfies `P`. Quantifiers are legal only where a Boolean condition is required.
 Prefixed `:none` values remain ordinary query fields and do not negate anything.
+
+Selector conditions are implemented in `if` guards and `while` conditions.
+For example, `end if any p:bomb-off adj self : T.push(1) all p:bomb-off adj self`
+checks for adjacent inert bombs when End fires. Conditions do not trigger rules
+by themselves. `none p:bomb-off adj self` checks their absence; `all o:you active`
+requires at least one friendly troop and every friendly troop to be active.
+With a selector alone and no further property, `all S` means `S` is non-empty.
+An empty base makes `any` and `all` false and `none` true. Conditions compose
+with `!`, `&`, and `|`; a selector may be parenthesized after its quantifier.
 
 Consequently, `any o:you bashing o:opp` is a Boolean condition, while
 `o:you bashing o:opp` is a selector. `any o:you bash o:opp` is not an event
@@ -394,7 +542,7 @@ post-notification rule. Cleanup is ordered as follows:
 
 ```text
 announce A -> capture A triggers -> apply A -> remove removed-after A state
-           -> resolve captured A triggers
+           -> finish remaining bundle members -> resolve captured A triggers
            -> announce A-resolved -> resolve captured A-resolved triggers
 ```
 
@@ -405,7 +553,7 @@ while `A` trigger consequences execute and from conditions checked by
 
 ### Unified update properties
 
-Updates are state contributions, never plausible verbs. They therefore occur
+Except for the player-resource verb `up-actions`, updates are state contributions. They occur
 inside a derived `have` attachment, or after ` : ` with an explicit stored
 lifetime:
 
@@ -449,13 +597,14 @@ Bombs have an explicit authoritative lifecycle:
 bomb-off       inert bomb state
 bomb-on        lit bomb state
 bomb-throw     proper bomb-icon turn action
-bomb-explode   engine-handled delayed consequence
+bomb-light     light an inert bomb and schedule its explosion
+bomb-explode   detonation (legacy alias: bomb-explode-resolve)
 bomb-defuse    instant action
 ```
 
 `bomb-throw` is the normal action that consumes the troop's turn and makes it
-inactive. Fire or another Bomb explosion may cause `bomb-explode`; a trigger
-may also produce `bomb-explode` or `bomb-defuse` after ` : `. In that triggered
+inactive. Fire or another Bomb explosion may light a bomb; a trigger
+may produce `bomb-light` or `bomb-defuse` after ` : `. In that triggered
 context they are forced actions and do not deactivate the source. This is an
 execution-context rule, not a `T` qualifier. A chosen `bomb-defuse` remains a
 normal turn action.
@@ -508,6 +657,8 @@ transition.
 | `deploy` | unit transitions to deployed; object is its destination hex |
 | `revive` | unary transition of the selected defeated unit |
 | `activate` | unit transitions to active; object is its current hex |
+| `deactivate` | unit transitions to inactive; costs use the unit itself as object, including off-board units |
+| `up-actions(N)` | source troop changes player `you` or `opp` action tokens by N |
 
 ### Snapshot properties
 
@@ -542,7 +693,7 @@ These words are deliberately not given a guessed meaning:
 | owner/control `none`, `both` | Do not confuse neutral ownership/control with the `none` quantifier. |
 | `subj`/`obj` after movement | Resolved: bindings are phrase-local; actions store coordinates and state stores concrete unit IDs. |
 | `all` over an empty domain | Decide classical vacuous truth versus “at least one and all.” |
-| multiple effects | Decide left-to-right sequencing versus simultaneous stack entries. |
+| multiple effects | Resolved: ordered bundle mutations precede all captured member triggers; `::` separates payment and effect bundles. |
 | history recording stage | Decide whether target, resolve, or after-resolve enters each interval. |
 
 Until these rulings are made, authors should use explicit canonical events and

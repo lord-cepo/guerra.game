@@ -2,35 +2,36 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyGameAction, availableActionsFor, combatBreakdown, combatSummary, controlSummary, createGameState } from "../dist/game/engine.js";
 import { parseRule } from "../dist/game/rule-parser.js";
+import { radiusSelector } from '../dist/game/action-selector.js';
 import { createEngineCards } from "./helpers/engine-fixture.mjs";
 
 const { cards, catalogueCards, troopSeeds } = createEngineCards();
 
-test('card definitions distinguish derived have rules from event triggers', () => {
-  assert.equal(cards.get('canyon-ibex').rules[0].kind, 'have');
+test('card definitions distinguish continuous rules from event triggers', () => {
+  assert.equal(cards.get('canyon-ibex').rules[0].kind, 'continuous');
   assert.equal(cards.get('sahel-porcupine').rules[0].kind, 'trigger');
   assert.deepEqual(cards.get('sahel-porcupine').ruleIds, ['momentum']);
 });
 
 test('the expansion cards expose their revised health, actions, and normalized rule text', () => {
   assert.equal(cards.get('stag-guardian').baseHealth, 4);
-  assert.deepEqual(cards.get('raven-prince').actions, [{ kind: 'fly', range: 3 }]);
+  assert.deepEqual(cards.get('raven-prince').actions, [{ kind: 'fly', selector: radiusSelector(3) }]);
   assert.deepEqual(cards.get('raven-prince').ruleSources, ['end : stun(1,1)']);
   assert.equal(cards.get('temple-last-bell').baseHealth, 2);
-  assert.deepEqual(cards.get('temple-last-bell').ruleSources, ['self die _ : F.bow(3,3) & F.bow(3,3)']);
+  assert.deepEqual(cards.get('temple-last-bell').ruleSources, ['self die _ : F.bow(3,3)']);
   assert.equal(cards.get('temple-marches').baseHealth, 2);
   assert.deepEqual(cards.get('tortoise-emperor').actions, []);
-  assert.equal(cards.get('tortoise-emperor').rules[0].consequences[0].kind, 'distributed-state');
+  assert.equal(cards.get('tortoise-emperor').rules[0].consequences[0].kind, 'event');
 });
 
 test('active and triggered card actions share the normalized action dictionary', () => {
-  assert.deepEqual(cards.get('queen-bee').actions[1], { kind: 'ranged', amount: 3, range: 4 });
+  assert.deepEqual(cards.get('queen-bee').actions[1], { kind: 'ranged', amount: 3, selector: radiusSelector(4) });
   assert.deepEqual(cards.get('raven-prince').rules[0].consequences[0].event.action, { name: 'stun', parameters: [1, 1], qualifiers: [] });
   for (const troop of troopSeeds) {
     for (const action of troop.actions) {
-      assert.deepEqual(Object.keys(action).sort(), Object.keys(action).filter(key => ['kind', 'amount', 'range', 'type'].includes(key)).sort(), `${troop.id} uses only normalized action keys`);
+      assert.deepEqual(Object.keys(action).sort(), Object.keys(action).filter(key => ['kind', 'amount', 'selector', 'type', 'costs', 'effect', 'followups'].includes(key)).sort(), `${troop.id} uses only normalized action keys`);
       assert.equal(typeof action.kind, 'string');
-      assert.equal(typeof action.range, 'number');
+      assert.equal(typeof action.selector, 'object');
       if (action.type !== undefined) assert.ok(Array.isArray(action.type));
     }
   }
@@ -43,7 +44,11 @@ test('Tortoise Emperor places troop-owned shields on each adjacent ally at End',
     { id: '1:snowy-owl', troopId: 'snowy-owl', owner: 1, coordinate: '2,2', permanentDamage: 0 },
     { id: '2:coastal-heron', troopId: 'coastal-heron', owner: 2, coordinate: '2,3', permanentDamage: 0 }
   ], effects: [], bashes: [], lastActingTroopId: {} };
-  const ended = applyGameAction(state, 1, { type: 'pass' }, cards);
+  const pending = applyGameAction(state, 1, { type: 'pass' }, cards);
+  assert.equal(pending.pendingResolution?.allTargets, true);
+  assert.equal(pending.units.some(unit => unit.shields), false);
+  const choice = availableActionsFor(pending, 1, 'tortoise-emperor', cards).find(action => action.type === 'resolve-rule');
+  const ended = applyGameAction(pending, 1, choice, cards);
   assert.deepEqual(ended.units.filter(unit => unit.shields).map(unit => [unit.coordinate, unit.shields?.[0].value]).sort(), [['1,1', 1], ['2,2', 1]]);
 });
 
@@ -76,7 +81,7 @@ test('Wandering Monarch End event pauses the turn for an optional one-hex move',
   ], effects: [], bashes: [], lastActingTroopId: {} };
   const ended = applyGameAction(state, 1, { type: 'move', troopId: 'steppe-lynx', coordinate: '1,1' }, cards);
   assert.equal(ended.activePlayer, 1, 'the opponent turn does not start before End resolves');
-  assert.deepEqual({ ...ended.pendingResolution, stackActionId: undefined }, { owner: 1, turnPlayer: 1, sourceUnitId: '1:wandering-monarch', sourceTroopId: 'wandering-monarch', kind: 'optional-move', distance: 1, stackActionId: undefined });
+  assert.deepEqual({ ...ended.pendingResolution, stackActionId: undefined, costs: undefined }, { owner: 1, turnPlayer: 1, sourceUnitId: '1:wandering-monarch', sourceTroopId: 'wandering-monarch', kind: 'optional-move', distance: 1, stackActionId: undefined, costs: undefined });
   const choices = availableActionsFor(ended, 1, 'wandering-monarch', cards);
   assert.ok(choices.some(action => action.type === 'resolve-pass'));
   assert.ok(choices.some(action => action.type === 'resolve-move' && action.coordinate === '2,2'));
@@ -203,7 +208,7 @@ test('Frosthorn Yak Start Pull can target and move a friendly troop', () => {
   assert.equal(resolved.activePlayer, 1, 'the Start Pull returns to the same player normal action');
 });
 
-test('triggered actions make every source inactive, while life and mod remain non-actions', () => {
+test('free triggered actions and state changes do not consume activity', () => {
   cards.set('trigger-actor', {
     id: 'trigger-actor', name: 'Trigger Actor', role: 'troop', baseHealth: 3, deploymentRegions: ['starting'], actions: [],
     rules: [parseRule('start : self mend(-1,0) self')], ruleIds: ['shot']
@@ -221,7 +226,7 @@ test('triggered actions make every source inactive, while life and mod remain no
   ], effects: [], bashes: [], lastActingTroopId: {} };
 
   state = applyGameAction(state, 2, { type: 'pass' }, cards);
-  assert.equal(state.units[0].inactiveOnTurn, 1, 'an ordinary triggered effect consumes activity');
+  assert.equal(state.units[0].inactiveOnTurn, undefined, 'mend is free under the consequence cost policy');
   assert.equal(state.units[1].permanentDamage, 0, 'life still triggers from an inactive source');
   assert.equal(state.units[1].shields?.[0]?.value, 1, 'mod still triggers from an inactive source');
 
@@ -242,7 +247,7 @@ test('life and maxlife change current and maximum health without exceeding the m
 test('an action performed during the opponent turn blocks the troop through its following turn', () => {
   cards.set('opponent-turn-trigger', {
     id: 'opponent-turn-trigger', name: 'Opponent Turn Trigger', role: 'troop', baseHealth: 4, deploymentRegions: ['starting'], actions: [],
-    rules: [parseRule('opponent-start : self mend(-1,0) self')], ruleIds: ['opponent-action']
+    rules: [parseRule('opponent-start : must self shield(1) self')], ruleIds: ['opponent-action']
   });
   const state = { activePlayer: 2, turnNumber: 1, units: [
     { id: '1:opponent-turn-trigger', troopId: 'opponent-turn-trigger', owner: 1, coordinate: '1,1', permanentDamage: 0 },
@@ -336,7 +341,8 @@ test('simultaneous triggers use the active player deck order before LIFO resolut
   const pending = applyGameAction(state, 1, { type: 'pass' }, cards);
   assert.equal(pending.pendingResolution.sourceTroopId, 'raven-prince');
   assert.equal(pending.dashboard.find(row => row.id === pending.currentEventId).causedByTriggerId, 'raven-prince:dusk-stun');
-  assert.equal(pending.pendingResolutionQueue[0].sourceTroopId, 'wandering-monarch');
+  const next = applyGameAction(pending, 1, { type: 'resolve-pass', troopId: 'raven-prince' }, cards);
+  assert.equal(next.pendingResolution.sourceTroopId, 'wandering-monarch');
 });
 
 test('block and self block remain available without an existing threat', () => {

@@ -3,6 +3,7 @@ import { boardDescriptionEntries, type Troop } from './troop-view.js';
 import { hexGap, hexSize, horizontalScale, svgNamespace } from './board-geometry.js';
 import type { Point } from './board-animation-geometry.js';
 import type { Player } from '../game/types.js';
+import { fitSvgText } from './svg-text-fit.js';
 
 export interface BoardDescriptionOptions {
   includeSelfBlock?: boolean;
@@ -56,10 +57,10 @@ function appendPlainText(parent: SVGTSpanElement, text: string, magicShield = fa
 }
 
 function appendText(parent: SVGTSpanElement, text: string, magicShield = false, owner: Player = 1): void {
-  for (const part of text.split(/(\[\[(?:friend|enemy)(?:-dark)?:[^\]]+\]\])/u).filter(Boolean)) {
-    const marker = part.match(/^\[\[(friend|enemy)(-dark)?:([^\]]+)\]\]$/u);
+  for (const part of text.split(/(\[\[(?:friend|enemy|neutral)(?:-dark)?:[^\]]+\]\])/u).filter(Boolean)) {
+    const marker = part.match(/^\[\[(friend|enemy|neutral)(-dark)?:([^\]]+)\]\]$/u);
     if (!marker) { appendPlainText(parent, part, magicShield); continue; }
-    const player = marker[1] === 'friend' ? owner : owner === 1 ? 2 : 1;
+    const player = marker[1] === 'neutral' ? 0 : marker[1] === 'friend' ? owner : owner === 1 ? 2 : 1;
     const span = document.createElementNS(svgNamespace, 'tspan'); span.classList.add(`relation-player-${player}${marker[2] ? '-dark' : ''}`); span.textContent = marker[3]; parent.append(span);
   }
 }
@@ -125,6 +126,11 @@ export function writeBoardDescription(marker: SVGTextElement, troop: Troop, posi
     } else if (line.magicModifier) appendMagicText(row, line.text, troop.owner);
     else appendText(row, line.text, line.action === 'magic-defense' || line.action === 'self-magic-defense', troop.owner);
     marker.append(row);
+    const radius = hexSize - hexGap;
+    const middle = position.y + radius * Math.sqrt(3) / 4;
+    const distance = Math.abs(boardDescriptionLineY(position, lines.length, index) - 3 - middle);
+    const width = 2 * radius * horizontalScale * (0.75 - 0.25 * Math.min(1, distance / (radius * Math.sqrt(3) / 4))) - 8;
+    requestAnimationFrame(() => fitSvgText(row, width));
   }
 }
 

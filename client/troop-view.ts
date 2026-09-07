@@ -13,7 +13,8 @@ import { PLAYABLE_COORDINATES, regionAt, type Coordinate } from '../game/board.j
 import type { Player } from '../game/types.js';
 import type { ParsedRule } from '../game/rule-parser.js';
 import type { GameActionType, ServerMatchState, ServerUnitState } from './protocol.js';
-import { compactRuleDescriptions, detailedRuleDescriptions } from './rule-text-presentation.js';
+import { compactRuleDescriptions, detailedRuleDescriptions, cardActionText } from './rule-text-presentation.js';
+import { withActionReach } from '../game/action-selector.js';
 
 export const pushIcon = '\u{1FAF8}';
 export const pullIcon = '\u{1FAF7}';
@@ -45,6 +46,7 @@ export interface Troop {
   magicDamageBonus?: number;
   magicRangeBonus?: number;
   staticAuras?: Array<{ ability: 'move' | 'attack' | 'magic'; left: number; right: number; sourceCardId: string }>;
+  effectiveRuleSources?: ServerUnitState['ruleSources'];
   upgrades?: Array<{ ability?: UpgradableAbility; left?: number; right?: number; sourceUnitId?: string }>;
   coordinate?: Coordinate;
   permanentDamage: number;
@@ -70,6 +72,7 @@ export function createTroopView(cardId: string, owner: Player, unit?: ServerUnit
     rangedDamageBonus: unit?.rangedDamageBonus ?? 0,
     rangedRangeBonus: unit?.rangedRangeBonus ?? 0,
     upgrades: unit?.upgrades,
+    effectiveRuleSources: unit?.ruleSources,
     defeated
   };
 }
@@ -218,12 +221,14 @@ function cardActionType(action: TroopAction): UpgradableAbility {
   return action.kind as UpgradableAbility;
 }
 
+import { actionReach } from '../game/action-selector.js';
+
 export function actionOfType(troop: Troop, type: UpgradableAbility): ActionView | undefined {
   const action = troop.actions.find(candidate => cardActionType(candidate) === type);
   if (!action) return undefined;
   const values = Array.isArray(action.amount) ? action.amount : [action.amount ?? 0];
   const first = values[0] ?? 0; const second = values[1] ?? 0;
-  return { type, range: action.range, amount: first, maxDistance: type === 'move' || type === 'fly' ? action.range : first, damage: first, block: first, left: first, right: second, usesHealth: type === 'attack' && action.amount === undefined, qualifiers: action.type };
+  return { type, range: actionReach(action), amount: first, maxDistance: type === 'move' || type === 'fly' ? actionReach(action) : first, damage: first, block: first, left: first, right: second, usesHealth: type === 'attack' && action.amount === undefined, qualifiers: action.type };
 }
 
 function attackPrefix(action: ActionView): string {
@@ -254,51 +259,12 @@ export function isMagicShieldSummaryText(troop: Troop, text: string): boolean {
 }
 
 export function serverCardDetails(troop: Troop): string[] {
-  const move = actionOfType(troop, 'move');
-  const fly = actionOfType(troop, 'fly');
-  const attack = actionOfType(troop, 'attack');
-  const defense = actionOfType(troop, 'defense');
-  const magicDefense = actionOfType(troop, 'magic-defense');
-  const magic = actionOfType(troop, 'magic');
-  const cannon = actionOfType(troop, 'cannon');
-  const gore = actionOfType(troop, 'gore');
-  const bomb = actionOfType(troop, 'bomb');
-  const push = actionOfType(troop, 'push');
-  const pull = actionOfType(troop, 'pull');
-  const stun = actionOfType(troop, 'stun');
-  const mending = actionOfType(troop, 'mending');
-  const upgrade = actionOfType(troop, 'upgrade');
-  const detail = (ability: UpgradableAbility, text: string): string => {
-    const bonus = upgradeBonus(troop, ability);
-    return bonus.left || bonus.right ? `🔮 ${text}` : text;
-  };
-  const selfDefense = troop.selfDefense !== undefined
-    ? detail('self-defense', `${troop.selfDefense + upgradeBonus(troop, 'self-defense').left} 🛡️`)
-    : '';
-  const selfMagicDefense = troop.selfMagicDefense !== undefined
-    ? `~${detail('self-magic-defense', `${troop.selfMagicDefense + upgradeBonus(troop, 'self-magic-defense').left} 🛡️`)}~`
-    : '';
-  return [...new Set([
-    move && move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right > 1 ? detail('move', `🥾 ${move.maxDistance + upgradeBonus(troop, 'move').right + staticAuraBonus(troop, 'move').right}`) : move || fly || troop.role === 'temple' ? '' : '🥾 0',
-    fly ? detail('fly', `🪽 ${fly.maxDistance + upgradeBonus(troop, 'fly').right}`) : '',
-    attack ? detail('attack', `${rangedDamage(troop, attack) + upgradeBonus(troop, 'attack').left + staticAuraBonus(troop, 'attack').left} ${attackPrefix(attack)}🏹 ${rangedRange(troop, attack) + upgradeBonus(troop, 'attack').right + staticAuraBonus(troop, 'attack').right}`) : '',
-    defense ? detail('defense', `${defense.block + upgradeBonus(troop, 'defense').left} 🛡️ ${defense.range + upgradeBonus(troop, 'defense').right}`) : '',
-    magicDefense ? `~${detail('magic-defense', `${magicDefense.block + upgradeBonus(troop, 'magic-defense').left} 🛡️ ${magicDefense.range + upgradeBonus(troop, 'magic-defense').right}`)}~` : '',
-    selfDefense,
-    selfMagicDefense,
-    magic ? detail('magic', `${magic.damage + (troop.magicDamageBonus ?? 0) + upgradeBonus(troop, 'magic').left + staticAuraBonus(troop, 'magic').left} ${magicPrefix(magic)}🔥 ${magic.range + (troop.magicRangeBonus ?? 0) + upgradeBonus(troop, 'magic').right + staticAuraBonus(troop, 'magic').right}`) : '',
-    cannon ? detail('cannon', `${cannon.damage + upgradeBonus(troop, 'cannon').left} 🧨 ${cannon.range + upgradeBonus(troop, 'cannon').right}`) : '',
-    gore ? detail('gore', `${gore.damage + upgradeBonus(troop, 'gore').left} ${goreIcon} ${gore.range + upgradeBonus(troop, 'gore').right}`) : '',
-    bomb ? detail('bomb', `${bomb.damage + upgradeBonus(troop, 'bomb').left} 💣 ${bomb.range + upgradeBonus(troop, 'bomb').right}`) : '',
-    push ? detail('push', `${push.maxDistance + upgradeBonus(troop, 'push').left}${pushIcon}${push.range + upgradeBonus(troop, 'push').right}`) : '',
-    pull ? detail('pull', `${pull.maxDistance + upgradeBonus(troop, 'pull').left}${pullIcon}${pull.range + upgradeBonus(troop, 'pull').right}`) : '',
-    stun ? detail('stun', `${stun.amount + upgradeBonus(troop, 'stun').left}${stunIcon}${stun.range + upgradeBonus(troop, 'stun').right}`) : '',
-    mending ? detail('mending', `${mending.amount + upgradeBonus(troop, 'mending').left} ❤️ ${mending.range + upgradeBonus(troop, 'mending').right}`) : '',
-    upgrade ? detail('upgrade', `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`) : '',
-    troop.control ? `Control ${troop.control}` : '',
-    ...passiveCompactDescriptions(troop),
-    ...compactRuleDescriptions(troop.rules)
-  ].filter(Boolean))];
+  return [...troop.actions.filter(action => action.kind !== 'move' || action.type?.includes('action-free') || actionReach(action) !== 1).map(action => cardActionText(presentedAction(troop, action))),
+    ...(!troop.actions.some(action => action.kind === 'move' || action.kind === 'fly') && troop.role !== 'temple' ? ['🥾0'] : []),
+    ...(troop.selfDefense !== undefined ? [`${troop.selfDefense + upgradeBonus(troop, 'self-defense').left} 🛡️`] : []),
+    ...(troop.selfMagicDefense !== undefined ? [`~${troop.selfMagicDefense + upgradeBonus(troop, 'self-magic-defense').left} 🛡️~`] : []),
+    ...(troop.control ? [`Control ${troop.control}`] : []),
+    ...passiveCompactDescriptions(troop), ...compactRuleDescriptions(troop.rules)];
 }
 
 export interface BoardDescriptionLine {
@@ -349,6 +315,10 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
   if (upgrade) abilities.push({ text: `${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`, action: 'upgrade' });
   if (troop.control) abilities.push({ text: `Control ${troop.control}` });
 
+  for (const entry of abilities) {
+    const source = troop.actions.find(action => cardActionType(action) === entry.action);
+    if (source) entry.text = cardActionText(presentedAction(troop, source));
+  }
   const contentLines: BoardDescriptionLine[] = [
     ...abilities,
     ...passiveCompactDescriptions(troop).map(text => ({ text })),
@@ -358,134 +328,36 @@ export function boardDescriptionEntries(troop: Troop, includeSelfBlock = false, 
   // Preserve the final row's action metadata when marking overflow so
   // selection highlights still point at the displayed ability.
   const visibleLines = contentLines.slice(0, 3);
-  if (contentLines.length > 3 && visibleLines[2]) {
-    visibleLines[2] = { ...visibleLines[2], text: `${visibleLines[2].text} ...` };
-  }
+  if (contentLines.length > 3 && visibleLines[2]) visibleLines[2] = { ...visibleLines[2], text: contentLines.slice(2).map(line => line.text).join('; ') };
   while (visibleLines.length < 3) visibleLines.push({ text: '' });
   return [{ text: healthDescription(troop) }, ...visibleLines];
 }
 
-export function actionDetails(troop: Troop): string[] {
-  return troop.actions.map(source => {
-    const action = actionOfType(troop, cardActionType(source))!;
-    const bonus = upgradeBonus(troop, action.type);
-    if (action.type === 'move') {
-      const distance = action.maxDistance + bonus.right + staticAuraBonus(troop, 'move').right;
-      return `🥾${distance} (move): up to ${distance} hex${distance === 1 ? '' : 'es'} through a clear path; entering an enemy starts a bash.`;
-    }
-    if (action.type === 'fly') {
-      const distance = action.maxDistance + bonus.right;
-      return `🪽${distance} (fly): land up to ${distance} hex${distance === 1 ? '' : 'es'} away, ignoring intervening units.`;
-    }
-    if (action.type === 'attack') {
-      const aura = staticAuraBonus(troop, 'attack');
-      const damage = rangedDamage(troop, action) + bonus.left + aura.left;
-      const distance = rangedRange(troop, action) + bonus.right + aura.right;
-      return `${damage}${attackPrefix(action)}🏹${distance} (ranged attack): ${damage} physical damage at distance ${distance}; resolves after the opponent acts and ${attackPrefix(action).includes('P') ? 'ignores physical modifiers' : 'shields can block it'}.`;
-    }
-    if (action.type === 'defense') {
-      const block = action.block + bonus.left; const distance = action.range + bonus.right;
-      return `${block}🛡️${distance} (block): add ${block} shield at distance ${distance} when physically threatened.`;
-    }
-    if (action.type === 'magic-defense') {
-      const block = action.block + bonus.left; const distance = action.range + bonus.right;
-      return `${block}🛡️${distance} (magic defense): add ${block} magic shield at distance ${distance} to a friendly troop.`;
-    }
-    if (action.type === 'cannon') {
-      const damage = action.damage + bonus.left; const distance = action.range + bonus.right;
-      return `${damage}🧨${distance} (cannon): ${damage} black-magic damage to every troop along a straight line up to distance ${distance}; resolves after the opponent acts, allows friendly fire, ignores physical modifiers but is reduced by magic shields.`;
-    }
-    if (action.type === 'gore') {
-      const damage = action.damage + bonus.left; const distance = action.range + bonus.right;
-      return `${damage}${goreIcon}${distance} (gore): immediately move to a valid straight-line hex within ${distance}; after the opponent acts, deal ${damage} physical damage to every enemy crossed. Entering an enemy hex starts a bash, and friendly destinations are forbidden.`;
-    }
-    if (action.type === 'bomb') {
-      const damage = action.damage + bonus.left; const distance = action.range + bonus.right;
-      return `${damage}💣${distance} (bomb): throw an inert ${damage}-damage bomb at distance ${distance}; a hex that already contains a bomb merges the new damage into it. Fire magic lights it, then its black-magic damage resolves after the next action on its hex and all adjacent hexes, affecting both players, ignoring physical modifiers but reduced by magic shields.`;
-    }
-    if (action.type === 'push' || action.type === 'pull') {
-      const displacementDistance = action.maxDistance + bonus.left; const targetDistance = action.range + bonus.right;
-      const icon = action.type === 'push' ? pushIcon : pullIcon;
-      const verb = action.type === 'push' ? 'push' : 'pull';
-      return `${displacementDistance}${icon}${targetDistance} (${verb}): choose a unit at distance ${targetDistance}, then ${verb} it up to ${displacementDistance} hexes in a straight line.`;
-    }
-    if (action.type === 'stun') {
-      const turns = action.amount + bonus.left; const distance = action.range + bonus.right;
-      return `${turns}${stunIcon}${distance} (stun): make an enemy troop at distance ${distance} inactive for ${turns} turn${turns === 1 ? '' : 's'}, clearing its shields and modifiers.`;
-    }
-    if (action.type === 'mending') {
-      const amount = action.amount + bonus.left; const distance = action.range + bonus.right;
-      return `${amount}❤️${distance} (mend): restore ${amount} permanent health damage at distance ${distance}.`;
-    }
-    if (action.type === 'upgrade') {
-      const left = action.left ?? 0; const right = action.right ?? 0;
-      return `${left || ''}🔮${right || ''} ${action.range} (upgrade): add ${left} to an ability's left value and ${right} to its right value at distance ${action.range}.`;
-    }
-    const aura = staticAuraBonus(troop, 'magic');
-    const damage = action.damage + (troop.magicDamageBonus ?? 0) + bonus.left + aura.left;
-    const distance = action.range + (troop.magicRangeBonus ?? 0) + bonus.right + aura.right;
-    const instant = action.qualifiers?.includes('instant'); const pierce = action.qualifiers?.includes('pierce');
-    return `${damage}${magicPrefix(action)}🔥${distance} (magic): ${damage} damage at distance ${distance}; ${instant ? 'resolves immediately' : 'resolves after the opponent acts'}, ignores shields, and kills only if lethal. Fire magic lights inert bombs; instant fire detonates them immediately${pierce ? '; pierce fire ignores the magic shield, makes bombs it lights pierce Obsidian magic immunity, and is marked with P' : ''}.`;
-  });
+function presentedAction(troop: Troop, source: TroopAction): TroopAction {
+  const ability = cardActionType(source);
+  const view = actionOfType(troop, ability)!;
+  const bonus = upgradeBonus(troop, ability);
+  const aura = ability === 'move' || ability === 'attack' || ability === 'magic' ? staticAuraBonus(troop, ability) : { left: 0, right: 0 };
+  const amount = ability === 'attack' ? rangedDamage(troop, view) : view.amount + (ability === 'magic' ? troop.magicDamageBonus ?? 0 : 0);
+  const reach = ability === 'attack' ? rangedRange(troop, view) : view.range + (ability === 'magic' ? troop.magicRangeBonus ?? 0 : 0);
+  return withActionReach({ ...source, ...(source.kind === 'upgrade' ? {} : { amount: amount + bonus.left + aura.left }) }, reach + bonus.right + aura.right);
 }
 
-/** Complete plain-language rules shown by every in-game card preview. */
+export function actionDetails(troop: Troop): string[] {
+  return troop.actions.filter(source => source.kind !== 'move' || source.type?.includes('action-free') || actionReach(source) !== 1).map(source => cardActionText(presentedAction(troop, source), true));
+}
+
+/** Hover describes this card's effects without repeating the game's action glossary. */
 export function cardRuleDetails(troop: Troop): string[] {
-  const rules = [deploymentDescription(troop), ...actionDetails(troop)];
-  if (!troop.actions.some(action => cardActionType(action) === 'move' || cardActionType(action) === 'fly')) {
-    rules.push('Movement: this unit cannot move.');
-  }
-  if (troop.selfDefense !== undefined) {
-    const block = troop.selfDefense + upgradeBonus(troop, 'self-defense').left;
-    rules.push(`${block}🛡️ (self block): add ${block} shield to itself when physically threatened.`);
-  }
-  if (troop.selfMagicDefense !== undefined) {
-    const block = troop.selfMagicDefense + upgradeBonus(troop, 'self-magic-defense').left;
-    rules.push(`${block}🛡️ (self magic defense): add ${block} magic shield to itself.`);
-  }
-  if (troop.control) rules.push(`Control ${troop.control}: this unit contributes ${troop.control} additional control to its current region.`);
-  rules.push(...passiveRuleDescriptions(troop));
-  rules.push(...detailedRuleDescriptions(troop.rules));
-  return rules;
+  return [...actionDetails(troop),
+    ...(troop.selfDefense !== undefined ? [`${troop.selfDefense + upgradeBonus(troop, 'self-defense').left}🛡️ here`] : []),
+    ...(troop.selfMagicDefense !== undefined ? [`~${troop.selfMagicDefense + upgradeBonus(troop, 'self-magic-defense').left}🛡️~ here`] : []),
+    ...(troop.control ? [`Control ${troop.control}`] : []),
+    ...passiveCompactDescriptions(troop), ...detailedRuleDescriptions(troop.rules)];
 }
 
 export function fullEffectLines(troop: Troop): string[] {
-  const move = actionOfType(troop, 'move');
-  const fly = actionOfType(troop, 'fly');
-  const attack = actionOfType(troop, 'attack');
-  const defense = actionOfType(troop, 'defense');
-  const magicDefense = actionOfType(troop, 'magic-defense');
-  const magic = actionOfType(troop, 'magic');
-  const cannon = actionOfType(troop, 'cannon');
-  const gore = actionOfType(troop, 'gore');
-  const bomb = actionOfType(troop, 'bomb');
-  const push = actionOfType(troop, 'push');
-  const pull = actionOfType(troop, 'pull');
-  const stun = actionOfType(troop, 'stun');
-  const mending = actionOfType(troop, 'mending');
-  const upgrade = actionOfType(troop, 'upgrade');
-  const effects: string[] = [];
-  if (move && move.maxDistance + upgradeBonus(troop, 'move').right > 1) effects.push(`${move.maxDistance} 🥾`);
-  else if (!move && !fly && troop.role !== 'temple') effects.push('0 🥾');
-  if (fly) effects.push(`${fly.maxDistance} 🪽`);
-  if ((troop.selfDefense ?? 1) + upgradeBonus(troop, 'self-defense').left > 1) effects.push(`${troop.selfDefense ?? 1} 🛡️`);
-  if ((troop.selfMagicDefense ?? 0) + upgradeBonus(troop, 'self-magic-defense').left > 0) effects.push(`~${troop.selfMagicDefense ?? 0} 🛡️~`);
-  if (attack) effects.push(`${rangedDamage(troop, attack)} ${attackPrefix(attack)}🏹 ${rangedRange(troop, attack)}`);
-  if (defense) effects.push(`${defense.block} 🛡️ ${defense.range}`);
-  if (magicDefense) effects.push(`~${magicDefense.block} 🛡️ ${magicDefense.range}~`);
-  if (magic) effects.push(`${magic.damage} ${magicPrefix(magic)}🔥 ${magic.range}`);
-  if (cannon) effects.push(`${cannon.damage} 🧨 ${cannon.range}`);
-  if (gore) effects.push(`${gore.damage}${goreIcon}${gore.range}`);
-  if (bomb) effects.push(`${bomb.damage} 💣 ${bomb.range}`);
-  if (push) effects.push(`${push.maxDistance}${pushIcon}${push.range}`);
-  if (pull) effects.push(`${pull.maxDistance}${pullIcon}${pull.range}`);
-  if (stun) effects.push(`${stun.amount}${stunIcon}${stun.range}`);
-  if (mending) effects.push(`${mending.amount} ❤️ ${mending.range}`);
-  if (upgrade) effects.push(`${upgrade.left ?? ''}🔮${upgrade.right ?? ''} ${upgrade.range}`);
-  if (troop.control) effects.push(`Control ${troop.control}`);
-  effects.push(...passiveCompactDescriptions(troop));
-  effects.push(...compactRuleDescriptions(troop.rules));
-  return [...new Set(effects)];
+  return [...new Set(serverCardDetails(troop))];
 }
 
 /** Keep compact board and card summaries readable without overflowing them. */

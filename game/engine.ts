@@ -1,14 +1,21 @@
+import { actionReach, expandSelector, withActionReach } from './action-selector.js';
 import type { ActionView, CardAction, PassiveKind, TroopAction, TroopSeed, UpgradableAbility } from './cards.js';
 import { adjacentCoordinates, hexDistance, isBoardCoordinate, PLAYABLE_COORDINATES, regionAt, straightLine, type Coordinate } from './board.js';
 import type { Player } from './types.js';
 import type { NormalizedEventRecord, RuleBinding } from './rule-evaluator.js';
+import { selectRuleHexes } from './rule-evaluator.js';
 import type { StoredRuleContribution } from './rule-state.js';
 import { cleanupStoredContributions, effectiveUnitState, selectStateTargetUnitIds, type DerivedRuleSource } from './rule-state.js';
-import { emitNormalizedEvent, emitNormalizedResolved, executeNormalizedIntent, type NormalizedActionIntent, type RuntimeRuleSource } from './rule-runtime.js';
+import { emitNormalizedEvent, emitNormalizedResolved, executeNormalizedIntent, executeNormalizedCommand, executeNormalizedBundle, resumeRuleRuntime, type RuleRuntimeHooks, type NormalizedActionIntent, type RuntimeRuleSource } from './rule-runtime.js';
+import { implicitActionCosts, explicitActionCosts, playerActions, validateActionCosts } from './action-costs.js';
+import { parseRule } from './rule-parser.js';
+import { ruleWord } from './rule-vocabulary.js';
+const heroTurnActionRule = parseRule('start : self up-actions(1) you');
 import type { RuleTriggeredConsequence } from './rule-parser.js';
 
 export type { Coordinate } from './board.js';
 export type GameAction =
+  | { type: 'resolve-rule'; troopId: string; coordinate: Coordinate; targetUnitId?: UnitId }
   | { type: 'pass' }
   | { type: 'deploy'; troopId: string; coordinate: Coordinate }
   | { type: 'move'; troopId: string; coordinate: Coordinate }
@@ -40,6 +47,16 @@ export type GameAction =
 export type UnitId = `${Player}:${string}`;
 /** Ordered timing windows within one player's turn. */
 export type TurnPhase = 'start' | 'action' | 'action-resolve' | 'combat-resolve' | 'end';
+export interface GameState {
+  scheduledRules?: import('./rule-scheduler.js').ScheduledRuleWork[];
+  namedValues?: import('./named-values.js').NamedValueState['namedValues'];
+  ruleWork?: import('./rule-runtime.js').RuleRuntimeWork[];
+  actions?: Partial<Record<Player, number>>;
+  offboardInactive?: Partial<Record<UnitId, number>>;
+  paidCommand?: PaidCommand;
+  turnCommand?: { player: Player; action: GameAction; readyBashes: string[] };
+}
+interface PaidCommand { player: Player; action: GameAction; pending?: PendingResolution; parent?: PaidCommand; }
 export interface Upgrade { ability: UpgradableAbility; left?: number; right?: number; sourceUnitId: UnitId; }
 export interface Shield { value: number; sourceUnitId?: UnitId; }
 export interface UnitState { id?: UnitId; troopId: string; owner: Player; coordinate: Coordinate; permanentDamage: number; maxLifeBonus?: number; /** Global turn on which this troop most recently performed an action. */ inactiveOnTurn?: number; /** Legacy persisted inactivity marker. */ inactiveUntilTurn?: number; rangedDamageBonus?: number; rangedRangeBonus?: number; combatModifierBonus?: number; bashModifierBonus?: number; magicModifierBonus?: number; stunnedTurns?: number; upgrades?: Upgrade[]; shields?: Shield[]; }
@@ -51,6 +68,8 @@ export interface DashboardUnitSnapshot { unitId: UnitId; troopId: string; owner:
 export interface DashboardTarget { hex: Coordinate; units: DashboardUnitSnapshot[]; }
 export interface DashboardOutcome { moved?: Array<{ unitId: UnitId; from: Coordinate; to: Coordinate }>; damaged?: Array<{ unitId: UnitId; amount: number }>; healed?: Array<{ unitId: UnitId; amount: number }>; defeated?: UnitId[]; }
 export interface StackAction {
+  /** Ordered members share one dashboard row and release triggers after the bundle. */
+  bundle?: { kind: 'cost' | 'effect'; events: NormalizedActionIntent[] };
   id: number;
   parentId?: number;
   causedByTriggerId?: string;
@@ -65,6 +84,7 @@ export interface StackAction {
   outcome?: DashboardOutcome;
 }
 export type PendingResolution = (
+  | { owner: Player; turnPlayer: Player; sourceUnitId: UnitId; sourceTroopId: string; kind: 'rule-choice'; intents: NormalizedActionIntent[]; allTargets?: boolean }
   | { owner: Player; turnPlayer: Player; sourceUnitId: UnitId; sourceTroopId: string; kind: 'optional-move'; distance: number }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'death-attack'; origin: Coordinate; damage: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'instant-ranged'; origin: Coordinate; damage: number; range: number; remaining: number; optional?: boolean }
@@ -72,24 +92,34 @@ export type PendingResolution = (
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'stun'; origin: Coordinate; turns: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceUnitId: UnitId; sourceTroopId: string; kind: 'trigger-pull'; distance: number; range: number }
   | { owner: Player; turnPlayer: Player; sourceTroopId: string; kind: 'revive' }
-) & { stackActionId?: number; /** Start-trigger choices resume the same player's normal action phase. */ resumeTurn?: boolean; /** The resolving action leaves its source active. */ tireless?: boolean; /** A `must` consequence cannot be declined. */ required?: boolean };
+) & { costs?: NormalizedActionIntent[]; stackActionId?: number; /** Start-trigger choices resume the same player's normal action phase. */ resumeTurn?: boolean; /** The resolving action leaves its source active. */ tireless?: boolean; /** A `must` consequence cannot be declined. */ required?: boolean };
 export interface GameState { activePlayer: Player; phase?: TurnPhase; winner?: Player; units: UnitState[]; effects: Effect[]; bashes: Bash[]; bombs?: Bomb[]; pendingResolution?: PendingResolution; pendingResolutionQueue?: PendingResolution[]; lastActingTroopId?: Partial<Record<Player, string>>; turnCounts?: Partial<Record<Player, number>>; turnNumber?: number; defeatedTroopIds?: string[]; revision?: number; events?: GameEvent[]; dashboard?: StackAction[]; resolutionStack?: number[]; currentEventId?: number; nextDashboardId?: number; deckOrder?: Partial<Record<Player, string[]>>; rulesVersion?: number; normalizedEvents?: NormalizedEventRecord[]; ruleContributions?: StoredRuleContribution[]; nextRuleContributionId?: number; }
 
-export function createGameState(deckOrder?: Partial<Record<Player, string[]>>): GameState { return { activePlayer: 1, phase: 'action', units: [], effects: [], bashes: [], bombs: [], lastActingTroopId: {}, turnCounts: { 1: 0, 2: 0 }, turnNumber: 0, defeatedTroopIds: [], revision: 0, events: [], dashboard: [], resolutionStack: [], nextDashboardId: 1, rulesVersion: 3, normalizedEvents: [], ruleContributions: [], nextRuleContributionId: 1, ...(deckOrder ? { deckOrder: structuredClone(deckOrder) } : {}) }; }
+export function createGameState(deckOrder?: Partial<Record<Player, string[]>>, cards?: ReadonlyMap<string, TroopSeed>): GameState {
+  const state: GameState = { activePlayer: 1, phase: 'action', actions: { 1: cards ? 0 : 1, 2: 0 }, units: [], effects: [], bashes: [], bombs: [], lastActingTroopId: {}, turnCounts: { 1: 0, 2: 0 }, turnNumber: 0, defeatedTroopIds: [], revision: 0, events: [], dashboard: [], resolutionStack: [], nextDashboardId: 1, rulesVersion: 3, normalizedEvents: [], ruleContributions: [], nextRuleContributionId: 1, ...(deckOrder ? { deckOrder: structuredClone(deckOrder) } : {}) };
+  if (cards) {
+    const start = recordPhase(state, 'start', cards);
+    publishRuleEvent(state, phaseEvent(state, 'start', 1), cards);
+    publishRuleEvent(state, phaseEvent(state, 'opponent-start', 1), cards);
+    finishStackAction(state, start.id);
+    if (!state.pendingResolution) completePhase(state, 'action', cards);
+  }
+  return state;
+}
 export function unitId(unit: Pick<UnitState, 'owner' | 'troopId' | 'id'>): UnitId { return unit.id ?? `${unit.owner}:${unit.troopId}`; }
 function findUnit(state: GameState, id: string): UnitState | undefined { return state.units.find(unit => unit.id === id || unitId(unit) === id || (!unit.id && unit.troopId === id)); }
 export function maximumHealth(unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): number { return Math.max(0, (cards.get(unit.troopId)?.baseHealth ?? 0) + (unit.maxLifeBonus ?? 0)); }
+export function effectiveRuleSources(state: GameState, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>) {
+  return effectiveUnitState(state, unit, cards, normalizedDerivedRules(state, cards)).contributions.map(({ sourceUnitId, property }) => ({
+    sourceName: cards.get(state.units.find(source => unitId(source) === sourceUnitId)?.troopId ?? sourceUnitId.split(':').slice(1).join(':'))?.name ?? sourceUnitId,
+    property
+  }));
+}
 export function effectiveMaximumHealth(state: GameState, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): number { return effectiveUnitState(state, unit, cards, normalizedDerivedRules(state, cards)).startingLife; }
 function health(state: GameState, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): number { return effectiveUnitState(state, unit, cards, normalizedDerivedRules(state, cards)).actualLife; }
 export function isUnitInactive(state: GameState, unit: UnitState): boolean {
   if (unit.inactiveOnTurn !== undefined || unit.inactiveUntilTurn !== undefined) return true;
   return state.lastActingTroopId?.[unit.owner] === unit.troopId;
-}
-function markUnitInactive(state: GameState, unit: UnitState): void {
-  unit.inactiveOnTurn = state.turnNumber ?? 0;
-  delete unit.inactiveUntilTurn;
-  state.lastActingTroopId ??= {};
-  state.lastActingTroopId[unit.owner] = unit.troopId;
 }
 function reactivateEligibleTroopsAtTurnEnd(state: GameState, player: Player): void {
   const oldestRetainedTurn = (state.turnNumber ?? 0) - 1;
@@ -170,7 +200,7 @@ function actionOfType(troop: TroopSeed, type: UpgradableAbility): ActionView | u
   const action = troop.actions.find(candidate => actionType(candidate) === type);
   if (!action) return undefined;
   const first = amount(action) ?? 0; const second = amount(action, 1) ?? 0;
-  return { type, range: action.range, amount: first, maxDistance: type === 'move' || type === 'fly' ? action.range : first, damage: first, block: first, left: first, right: second, usesHealth: type === 'attack' && action.amount === undefined, qualifiers: action.type };
+  return { type, range: actionReach(action), amount: first, maxDistance: type === 'move' || type === 'fly' ? actionReach(action) : first, damage: first, block: first, left: first, right: second, usesHealth: type === 'attack' && action.amount === undefined, qualifiers: action.type };
 }
 function amount(action: TroopAction | undefined, index = 0): number | undefined {
   return Array.isArray(action?.amount) ? action.amount[index] : index === 0 ? action?.amount as number | undefined : undefined;
@@ -191,6 +221,7 @@ function finishStackAction(state: GameState, id: number, outcome?: DashboardOutc
   state.currentEventId = state.resolutionStack.at(-1);
 }
 function actionForCommand(action: GameAction, cards: ReadonlyMap<string, TroopSeed>): CardAction {
+  if (action.type === 'resolve-rule') return { kind: 'phase', range: 0 };
   if ('troopId' in action && !action.type.startsWith('resolve-')) {
     const troop = cards.get(action.troopId);
     const ability = action.type === 'self-defense' || action.type === 'self-magic-defense' ? undefined : action.type as UpgradableAbility;
@@ -249,7 +280,7 @@ function flyRange(troop: TroopSeed, unit: UnitState): number { return (actionOfT
 function actionRange(state: GameState, troop: TroopSeed, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>, type: 'attack' | 'cannon' | 'gore' | 'bomb' | 'magic' | 'defense' | 'magic-defense' | 'push' | 'pull' | 'stun' | 'mending' | 'upgrade'): number {
   const action = actionOfType(troop, type);
   const aura = type === 'attack' || type === 'magic' ? staticBonus(state, unit, cards, type) : { right: 0 };
-  return action ? action.range + upgradeBonus(unit, type).right + aura.right + (type === 'attack' ? unit.rangedRangeBonus ?? 0 : 0) : -1;
+  return action ? actionReach(action) + upgradeBonus(unit, type).right + aura.right + (type === 'attack' ? unit.rangedRangeBonus ?? 0 : 0) : -1;
 }
 function attackDamage(state: GameState, troop: TroopSeed, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): number {
   const action = actionOfType(troop, 'attack');
@@ -267,18 +298,18 @@ export function effectiveTroopActions(state: GameState, unit: UnitState, cards: 
   const troop = card(cards, unit.troopId);
   return troop.actions.map(action => {
     const ability = actionType(action);
-    if (ability === 'move') return { ...action, range: moveRange(state, troop, unit, cards) };
-    if (ability === 'fly') return { ...action, range: flyRange(troop, unit) };
-    if (ability === 'attack') return { ...action, amount: attackDamage(state, troop, unit, cards), range: actionRange(state, troop, unit, cards, 'attack') };
-    if (ability === 'magic') return { ...action, amount: effectValue(state, troop, cards, unit), range: actionRange(state, troop, unit, cards, 'magic') };
-    if (ability === 'cannon') return { ...action, amount: cannonDamage(troop, unit), range: actionRange(state, troop, unit, cards, 'cannon') };
-    if (ability === 'gore') return { ...action, amount: goreDamage(troop, unit), range: actionRange(state, troop, unit, cards, 'gore') };
-    if (ability === 'bomb') return { ...action, amount: bombDamage(troop, unit), range: actionRange(state, troop, unit, cards, 'bomb') };
+    if (ability === 'move') return withActionReach(action, moveRange(state, troop, unit, cards));
+    if (ability === 'fly') return withActionReach(action, flyRange(troop, unit));
+    if (ability === 'attack') return withActionReach({ ...action, amount: attackDamage(state, troop, unit, cards) }, actionRange(state, troop, unit, cards, 'attack'));
+    if (ability === 'magic') return withActionReach({ ...action, amount: effectValue(state, troop, cards, unit) }, actionRange(state, troop, unit, cards, 'magic'));
+    if (ability === 'cannon') return withActionReach({ ...action, amount: cannonDamage(troop, unit) }, actionRange(state, troop, unit, cards, 'cannon'));
+    if (ability === 'gore') return withActionReach({ ...action, amount: goreDamage(troop, unit) }, actionRange(state, troop, unit, cards, 'gore'));
+    if (ability === 'bomb') return withActionReach({ ...action, amount: bombDamage(troop, unit) }, actionRange(state, troop, unit, cards, 'bomb'));
     const view = actionOfType(troop, ability);
     const bonus = upgradeBonus(unit, ability);
     const amountValue = view ? view.amount + bonus.left : action.amount;
-    const rangeValue = view ? view.range + bonus.right : action.range;
-    return { ...action, ...(amountValue !== undefined ? { amount: amountValue } : {}), range: rangeValue };
+    const rangeValue = view ? view.range + bonus.right : actionReach(action);
+    return withActionReach({ ...action, ...(amountValue !== undefined ? { amount: amountValue } : {}) }, rangeValue);
   });
 }
 
@@ -422,10 +453,6 @@ function enqueueResolution(state: GameState, resolution: PendingResolution): voi
   else (state.pendingResolutionQueue ??= []).push(resolution);
 }
 
-function pendingResumesTurn(state: GameState, pending: PendingResolution): boolean {
-  return pending.resumeTurn === true
-    || Boolean(pending.stackActionId && state.dashboard?.find(row => row.id === pending.stackActionId)?.phase === 'start');
-}
 
 function optionalMoveTargets(state: GameState, source: UnitState, distance: number): Coordinate[] {
   return PLAYABLE_COORDINATES.filter(coordinate => {
@@ -451,6 +478,7 @@ function pullTargets(state: GameState, source: UnitState, distance: number, rang
 }
 
 function remove(state: GameState, unit: UnitState, cards: ReadonlyMap<string, TroopSeed>): void {
+  if (isUnitInactive(state, unit)) (state.offboardInactive ??= {})[unitId(unit)] = unit.inactiveOnTurn ?? state.turnNumber ?? 0;
   const deathHex = unit.coordinate;
   const troop = card(cards, unit.troopId);
   const deathRules = runtimeRules(state, cards);
@@ -509,10 +537,10 @@ function resolveNormalizedTriggeredAction(state: GameState, unit: UnitState, eve
       for (const target of targets) addTemporaryModifiers(target, amount(action) ?? 0, amount(action, 1) ?? 0, unitId(unit));
     }
     else if (action.kind === 'ranged' && action.type?.includes('instant') && event.controller === unit.owner) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, remaining: amount(action, 1) ?? 1, ...(action.type.includes('optional') ? { optional: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: unit.coordinate, damage: amount(action) ?? 0, range: actionReach(action), remaining: amount(action, 1) ?? 1, ...(action.type.includes('optional') ? { optional: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
     }
     else if (action.kind === 'fire' && action.type?.includes('instant') && event.controller === unit.owner) {
-      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'instant-magic', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, ...(action.type.includes('pierce') ? { pierce: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
+      row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'instant-magic', origin: unit.coordinate, damage: amount(action) ?? 0, range: actionReach(action), ...(action.type.includes('pierce') ? { pierce: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
     }
     else if (action.kind === 'stun' && event.object?.kind === 'unit' && event.controller === unit.owner) {
       const target = findUnit(state, event.object.unitId);
@@ -524,18 +552,18 @@ function resolveNormalizedTriggeredAction(state: GameState, unit: UnitState, eve
       }
     }
     else if (action.kind === 'stun' && event.controller === unit.owner) {
-      if (stunTargets(state, unit.owner, unit.coordinate, action.range).length) {
+      if (stunTargets(state, unit.owner, unit.coordinate, actionReach(action)).length) {
         row.status = 'waiting-input';
-        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'stun', origin: unit.coordinate, turns: amount(action) ?? 0, range: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
+        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'stun', origin: unit.coordinate, turns: amount(action) ?? 0, range: actionReach(action), ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
       }
     }
     else if (action.kind === 'pull' && event.controller === unit.owner) {
-      if (pullTargets(state, unit, amount(action) ?? 0, action.range).length) {
+      if (pullTargets(state, unit, amount(action) ?? 0, actionReach(action)).length) {
         row.status = 'waiting-input';
-        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'trigger-pull', distance: amount(action) ?? 0, range: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
+        enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'trigger-pull', distance: amount(action) ?? 0, range: actionReach(action), ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
       }
     }
-    else if (action.kind === 'defense' && action.range === 0 && event.controller === unit.owner) {
+    else if (action.kind === 'defense' && actionReach(action) === 0 && event.controller === unit.owner) {
       const value = amount(action) ?? 0;
       if (action.type?.includes('magic')) addMagicModifier(unit, value);
       else addShield(unit, value, unitId(unit));
@@ -549,14 +577,14 @@ function resolveNormalizedTriggeredAction(state: GameState, unit: UnitState, eve
       }
       performedAction = true;
     }
-    // Triggered moves are always optional (declinable) unless a future type
-    // qualifier marks them mandatory. The pending choice owns the Skip action.
+    // The shared consequence cost policy determines whether Skip is available.
     else if (action.kind === 'move' && event.controller === unit.owner) {
-      if (optionalMoveTargets(state, unit, action.range).length) {
-        row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'optional-move', distance: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
+      if (optionalMoveTargets(state, unit, actionReach(action)).length) {
+        row.status = 'waiting-input'; enqueueResolution(state, { owner: unit.owner, turnPlayer: event.controller, sourceUnitId: unitId(unit), sourceTroopId: unit.troopId, kind: 'optional-move', distance: actionReach(action), ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(required ? { required: true } : {}), stackActionId: row.id });
       }
     }
-    if (performedAction && !action.type?.includes('tireless') && state.units.includes(unit)) markUnitInactive(state, unit);
+    // Activity is committed by the cost bundle before this mutation.
+    void performedAction;
 }
 
 function cardActionFromNormalizedIntent(intent: NormalizedActionIntent): CardAction | undefined {
@@ -583,7 +611,7 @@ function materializeNativeTransientModifier(
   consequence: Extract<RuleTriggeredConsequence, { kind: 'stored-state' }>,
   event: NormalizedEventRecord
 ): { success: boolean; canceled?: boolean; reason?: string } | undefined {
-  if (consequence.lifetime.kind === 'permanent' || consequence.state.property.name !== 'up-mod') return undefined;
+  if (consequence.lifetime.kind === 'permanent' || consequence.state.property.name !== 'up-mod' || consequence.lifetime.event.kind === 'phase' && consequence.lifetime.event.next) return undefined;
   const sourceUnit = findUnit(state, source.sourceUnitId);
   if (!sourceUnit) return { success: false, canceled: true, reason: 'Normalized modifier source is no longer deployed.' };
   const selected = selectStateTargetUnitIds(consequence.state, {
@@ -608,6 +636,20 @@ function materializeNativeTransientModifier(
 function applyNormalizedTriggeredIntent(state: GameState, intent: NormalizedActionIntent, event: NormalizedEventRecord, cards: ReadonlyMap<string, TroopSeed>, parentId = state.currentEventId, sourceSnapshot?: UnitState): { success: boolean; canceled?: boolean; reason?: string } {
   const sourceId = intent.subject?.kind === 'unit' ? intent.subject.unitId : undefined;
   const unit = sourceId ? findUnit(state, sourceId) ?? (sourceSnapshot && unitId(sourceSnapshot) === sourceId ? sourceSnapshot : undefined) : undefined;
+  if (intent.name === 'die' && unit) { remove(state, unit, cards); return { success: true }; }
+  if (intent.name === 'bomb-light' || intent.name === 'bomb-defuse') {
+    const target = intent.target ?? (intent.object?.kind === 'hex' ? intent.object.coordinate : intent.object?.kind === 'unit' ? findUnit(state, intent.object.unitId)?.coordinate : undefined);
+    const bomb = state.bombs?.find(item => item.coordinate === target);
+    if (bomb) {
+      if (intent.name === 'bomb-defuse') state.bombs = state.bombs?.filter(candidate => candidate !== bomb);
+      else igniteBomb(state, bomb, intent.controller, intent.qualifiers.includes('pierce'));
+    }
+    return { success: Boolean(bomb), ...(!bomb ? { canceled: true, reason: 'No inert bomb at the target.' } : {}) };
+  }
+  if (intent.target && unit) {
+    const concrete = applyConcreteRuleAction(state, intent, unit, cards);
+    if (concrete) return concrete;
+  }
   const action = cardActionFromNormalizedIntent(intent);
   if (!unit || !action) return { success: false, canceled: true, reason: `Unsupported normalized triggered action ${intent.name}.` };
   const row = appendStackAction(state, cards, {
@@ -620,8 +662,8 @@ function applyNormalizedTriggeredIntent(state: GameState, intent: NormalizedActi
   if (event.name === 'die' && action.kind === 'ranged') {
     row.status = 'waiting-input';
     enqueueResolution(state, action.type?.includes('instant')
-      ? { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, remaining: amount(action, 1) ?? 1, ...(action.type.includes('optional') ? { optional: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), ...(intent.mandatory ? { required: true } : {}), stackActionId: row.id }
-      : { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'death-attack', origin: unit.coordinate, damage: amount(action) ?? 0, range: action.range, ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(intent.mandatory ? { required: true } : {}), stackActionId: row.id });
+      ? { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'instant-ranged', origin: unit.coordinate, damage: amount(action) ?? 0, range: actionReach(action), remaining: amount(action, 1) ?? 1, ...(action.type.includes('optional') ? { optional: true } : {}), ...(action.type.includes('tireless') ? { tireless: true } : {}), ...(intent.mandatory ? { required: true } : {}), stackActionId: row.id }
+      : { owner: unit.owner, turnPlayer: event.controller, sourceTroopId: unit.troopId, kind: 'death-attack', origin: unit.coordinate, damage: amount(action) ?? 0, range: actionReach(action), ...(action.type?.includes('tireless') ? { tireless: true } : {}), ...(intent.mandatory ? { required: true } : {}), stackActionId: row.id });
   } else if (event.name === 'die' && action.kind === 'revive') {
     if ((state.defeatedTroopIds ?? []).some(id => id !== unitId(unit) && id.startsWith(`${unit.owner}:`) && cards.get(id.split(':').slice(1).join(':'))?.role !== 'hero')) {
       row.status = 'waiting-input';
@@ -640,9 +682,49 @@ function applyNormalizedTriggeredIntent(state: GameState, intent: NormalizedActi
   return { success: true };
 }
 
+function applyConcreteRuleAction(state: GameState, intent: NormalizedActionIntent, source: UnitState, cards: ReadonlyMap<string, TroopSeed>): { success: boolean; canceled?: boolean; reason?: string } | undefined {
+  const name = ({ bow: 'attack', fire: 'magic', shield: 'defense', mshield: 'magic-defense', 'bomb-throw': 'bomb', 'gore-move': 'gore', mend: 'mending' } as Record<string, string>)[intent.name] ?? intent.name;
+  if (!['move', 'fly', 'attack', 'cannon', 'gore', 'defense', 'magic-defense', 'bomb', 'push', 'pull', 'upgrade', 'deploy', 'stun', 'magic', 'mending'].includes(name)) return;
+  const target = intent.target as Coordinate;
+  const range = hexDistance(source.coordinate, target);
+  const kind = ({ attack: 'ranged', magic: 'fire', 'magic-defense': 'defense' } as Record<string, CardAction['kind']>)[name] ?? name as CardAction['kind'];
+  const type: Array<NonNullable<CardAction['type']>[number]> = intent.qualifiers.map(value => value === 'fast' ? 'instant' : value);
+  if (name === 'magic-defense') type.push('magic');
+  const ability: CardAction = { kind, amount: intent.name === 'upgrade' ? [Number(intent.parameters[0] ?? 0), Number(intent.parameters[1] ?? 0)] : Number(intent.parameters[0] ?? 0), range, type };
+  const adaptedCards = new Map(cards);
+  adaptedCards.set(source.troopId, { ...card(cards, source.troopId), actions: [ability] });
+  let action = { type: name, troopId: source.troopId, coordinate: target } as GameAction;
+  if (name === 'push' || name === 'pull') {
+    const targetUnit = at(state, target);
+    const destination = displacementLine(name, source.coordinate, target, Number(intent.parameters[0] ?? 0))?.at(-1);
+    if (!destination) return { success: false, canceled: true, reason: 'The displacement has no legal destination.' };
+    action = { type: name, troopId: source.troopId, coordinate: target, destination, ...(targetUnit ? { targetUnitId: unitId(targetUnit) } : { targetBomb: true }) };
+  }
+  if (name === 'upgrade') {
+    const targetUnit = at(state, target);
+    const targetCard = targetUnit && cards.get(targetUnit.troopId);
+    const upgraded = targetCard?.actions.find(candidate => (candidate.kind === 'move' || candidate.kind === 'fly') ? Number(intent.parameters[1] ?? 0) !== 0 : Number(intent.parameters[0] ?? 0) !== 0 || Number(intent.parameters[1] ?? 0) !== 0);
+    if (!upgraded) return { success: false, canceled: true, reason: 'No target ability can receive the upgrade.' };
+    action = { type: 'upgrade', troopId: source.troopId, coordinate: target, ability: actionType(upgraded) };
+  }
+  try {
+    applyAuthoritativeAction(structuredClone(state), source.owner, action, adaptedCards, undefined, { mutationOnly: true, costsPaid: true, triggered: true });
+  } catch (error) { return { success: false, canceled: true, reason: error instanceof Error ? error.message : String(error) }; }
+  const revision = state.revision;
+  const events = structuredClone(state.events);
+  const count = state.dashboard?.length ?? 0;
+  const phase = state.phase;
+  applyAuthoritativeAction(state, source.owner, action, adaptedCards, undefined, { mutationOnly: true, costsPaid: true, triggered: true });
+  state.revision = revision; state.events = events; state.phase = phase;
+  const row = state.dashboard?.slice(count).find(row => row.sourceUnitId === unitId(source) && row.action.kind === kind);
+  if (row) row.causedByTriggerId = intent.causedByRuleId;
+  return { success: true };
+}
+
 function publishRuleEvent(state: GameState, event: NormalizedEventRecord, cards: ReadonlyMap<string, TroopSeed>): void {
   const parentId = state.currentEventId;
   const result = emitNormalizedEvent(state, cards, runtimeRules(state, cards), event, {
+    ...engineRuntimeHooks(state, cards),
     apply: intent => applyNormalizedTriggeredIntent(state, intent, event, cards, parentId),
     materializeState: (source, consequence, normalizedEvent) => materializeNativeTransientModifier(state, cards, source, consequence, normalizedEvent)
   });
@@ -671,7 +753,9 @@ export function availableActionsFor(state: GameState, player: Player, troopId: s
     const pending = state.pendingResolution;
     if (pending.owner !== player || pending.sourceTroopId !== troopId) return [];
     const choices: GameAction[] = pending.required ? [] : [{ type: 'resolve-pass', troopId }];
-    if (pending.kind === 'optional-move') {
+    if (pending.kind === 'rule-choice') {
+      for (const intent of pending.intents) if (intent.target) choices.push({ type: 'resolve-rule', troopId, coordinate: intent.target as Coordinate, ...(intent.object?.kind === 'unit' ? { targetUnitId: intent.object.unitId } : {}) });
+    } else if (pending.kind === 'optional-move') {
       const source = findUnit(state, pending.sourceUnitId); if (!source) return choices;
       for (const coordinate of optionalMoveTargets(state, source, pending.distance)) choices.push({ type: 'resolve-move', troopId, coordinate });
     } else if (pending.kind === 'death-attack') {
@@ -697,7 +781,7 @@ export function availableActionsFor(state: GameState, player: Player, troopId: s
   }
   const troop = cards.get(troopId);
   const deployedUnit = state.units.find(item => item.owner === player && item.troopId === troopId);
-  if (!troop || state.winner || state.activePlayer !== player || (deployedUnit ? isUnitInactive(state, deployedUnit) : state.lastActingTroopId?.[player] === troopId) || (deployedUnit?.stunnedTurns ?? 0) > 0 || state.defeatedTroopIds?.includes(`${player}:${troopId}`)) return [];
+  if (!troop || state.winner || state.activePlayer !== player || (deployedUnit?.stunnedTurns ?? 0) > 0 || state.defeatedTroopIds?.includes(`${player}:${troopId}`)) return [];
   const unit = deployedUnit;
   const available: GameAction[] = [];
   const addIfAccepted = (action: GameAction): void => {
@@ -760,12 +844,14 @@ function applyAuthoritativeAction(
   player: Player,
   action: GameAction,
   cards: ReadonlyMap<string, TroopSeed>,
-  eventResolved?: (state: GameState) => void
+  eventResolved?: (state: GameState) => void,
+  options: { mutationOnly?: boolean; costsPaid?: boolean; triggered?: boolean } = {}
 ): GameState {
   // Persisted games from before phases were introduced resume in their only
+  if (action.type === 'resolve-rule') throw new Error('A rule choice must resolve through its continuation.');
   // player-input window. Event choices retain the phase that produced them.
   state.phase ??= state.pendingResolution ? 'end' : 'action';
-  if (state.winner || (!state.pendingResolution && state.activePlayer !== player)) throw new Error('It is not your turn.');
+  if (state.winner || (!options.triggered && !state.pendingResolution && state.activePlayer !== player)) throw new Error('It is not your turn.');
   if (state.pendingResolution) {
     const pending = state.pendingResolution;
     if (pending.owner !== player || !('troopId' in action) || action.troopId !== pending.sourceTroopId || !['resolve-move', 'resolve-death-attack', 'resolve-instant-ranged', 'resolve-instant-magic', 'resolve-stun', 'resolve-pull', 'resolve-revive', 'resolve-pass'].includes(action.type)) throw new Error('Resolve the pending event action first.');
@@ -838,40 +924,18 @@ function applyAuthoritativeAction(
       const defeatedId = `${player}:${action.targetTroopId}`;
       if (action.targetTroopId === pending.sourceTroopId || !state.defeatedTroopIds?.includes(defeatedId) || cards.get(action.targetTroopId)?.role === 'hero') throw new Error('Revive target is invalid.');
       state.defeatedTroopIds = state.defeatedTroopIds.filter(id => id !== defeatedId);
+      if (state.offboardInactive) delete state.offboardInactive[`${player}:${action.targetTroopId}`];
       if (state.lastActingTroopId?.[player] === action.targetTroopId) delete state.lastActingTroopId[player];
     } else if (action.type !== 'resolve-pass') {
       throw new Error('This resolution does not support that action.');
     }
-    if (action.type !== 'resolve-pass' && !pending.tireless) {
-      const source = state.units.find(unit => unit.owner === player && unit.troopId === pending.sourceTroopId);
-      if (source) markUnitInactive(state, source);
-    }
-    eventResolved?.(state);
     state.pendingResolution = state.pendingResolutionQueue?.shift();
     if (!state.pendingResolution) state.pendingResolutionQueue = [];
+    eventResolved?.(state);
     if (pending.stackActionId && state.pendingResolution?.stackActionId !== pending.stackActionId) finishStackAction(state, pending.stackActionId);
     state.revision = (state.revision ?? 0) + 1;
     state.events ??= [];
     state.events.push({ revision: state.revision, player, action: structuredClone(action), ...(origin ? { origin } : {}) });
-    if (state.pendingResolution) return state;
-    if (pendingResumesTurn(state, pending)) {
-      finishOpenStack(state);
-      completePhase(state, 'action', cards);
-      return state;
-    }
-    state.phase = 'end';
-    const turnPlayer = pending.turnPlayer;
-    completeEndForBashes(state);
-    publishRuleEvent(state, phaseEvent(state, 'opponent-end', turnPlayer), cards);
-    finishOpenStack(state);
-    reactivateEligibleTroopsAtTurnEnd(state, turnPlayer);
-    clearStunAtTurnEnd(state, turnPlayer);
-    state.activePlayer = turnPlayer === 1 ? 2 : 1;
-    beginTurn(state, state.activePlayer);
-    const startRow = recordPhase(state, 'start', cards);
-    publishRuleEvent(state, phaseEvent(state, 'start', state.activePlayer), cards);
-    publishRuleEvent(state, phaseEvent(state, 'opponent-start', state.activePlayer), cards);
-    finishStackAction(state, startRow.id); completePhase(state, 'action', cards);
     return state;
   }
   // Only combats that were already pending when this response began may
@@ -881,34 +945,13 @@ function applyAuthoritativeAction(
   const bashesReadyToResolve = new Set(state.bashes.filter(bash => !bash.awaitingEnd));
   const commandRow = beginCommandRow(state, player, action, cards);
   if (action.type === 'pass') {
-    // Passing is still the defender's response.  Resolve delayed attacks,
-    // magic, bashes, and their temporary upgrades exactly as after any other
-    // response action, before end-of-turn triggers run.
-    commandRow.status = 'ready'; completePhase(state, 'combat-resolve', cards);
-    resolveAfterDefenderAction(state, player, cards, bashesReadyToResolve);
-    const endRow = recordPhase(state, 'end', cards);
-    publishRuleEvent(state, phaseEvent(state, 'end', player), cards);
+    eventResolved?.(state);
     state.revision = (state.revision ?? 0) + 1;
-    state.events ??= [];
-    state.events.push({ revision: state.revision, player, action: structuredClone(action) });
-    if (state.pendingResolution) return state;
-    completeEndForBashes(state);
-    publishRuleEvent(state, phaseEvent(state, 'opponent-end', player), cards);
-    finishStackAction(state, endRow.id); finishStackAction(state, commandRow.id);
-    reactivateEligibleTroopsAtTurnEnd(state, player);
-    clearStunAtTurnEnd(state, player);
-    state.activePlayer = player === 1 ? 2 : 1;
-    beginTurn(state, state.activePlayer);
-    const nextPlayer = state.activePlayer;
-    const startRow = recordPhase(state, 'start', cards);
-    publishRuleEvent(state, phaseEvent(state, 'start', nextPlayer), cards);
-    publishRuleEvent(state, phaseEvent(state, 'opponent-start', nextPlayer), cards);
-    finishStackAction(state, startRow.id); completePhase(state, 'action', cards);
+    (state.events ??= []).push({ revision: state.revision, player, action });
+    finishStackAction(state, commandRow.id);
     return state;
   }
   if (action.type === 'resolve-move' || action.type === 'resolve-death-attack' || action.type === 'resolve-instant-ranged' || action.type === 'resolve-instant-magic' || action.type === 'resolve-stun' || action.type === 'resolve-pull' || action.type === 'resolve-revive' || action.type === 'resolve-pass') throw new Error('There is no pending event action.');
-  const inactivityCandidate = state.units.find(item => item.owner === player && item.troopId === action.troopId);
-  if (inactivityCandidate ? isUnitInactive(state, inactivityCandidate) : state.lastActingTroopId?.[player] === action.troopId) throw new Error('This troop is inactive.');
   if (action.type !== 'self-defense' && action.type !== 'self-magic-defense' && !isBoardCoordinate(action.coordinate)) throw new Error('Invalid hex.');
   const troop = card(cards, action.troopId);
   const unit = state.units.find(item => item.owner === player && item.troopId === action.troopId);
@@ -925,7 +968,10 @@ function applyAuthoritativeAction(
       : troop.deploymentRegions.includes(targetRegion.type) && controller(state, action.coordinate, cards) === player;
     if (!allowed) throw new Error('You do not control a valid deployment region.');
     if (troop.role !== 'hero' && !state.units.some(item => item.owner === player && card(cards, item.troopId).role === 'hero')) throw new Error('Deploy your hero first.');
-    state.units.push({ id: `${player}:${action.troopId}`, troopId: action.troopId, owner: player, coordinate: action.coordinate, permanentDamage: 0 });
+    const id = `${player}:${action.troopId}` as UnitId;
+    const inactiveOnTurn = state.offboardInactive?.[id];
+    state.units.push({ id, troopId: action.troopId, owner: player, coordinate: action.coordinate, permanentDamage: 0, ...(inactiveOnTurn !== undefined ? { inactiveOnTurn } : {}) });
+    if (state.offboardInactive) delete state.offboardInactive[id];
   } else {
     if (!unit) throw new Error('Your troop is not deployed.');
     if (action.type === 'move' || action.type === 'fly') {
@@ -1089,41 +1135,9 @@ function applyAuthoritativeAction(
   // The selected event is now complete. Its triggers resolve here, before
   // delayed combat, End triggers, inactivity, and the next player's Start.
   eventResolved?.(state);
-  commandRow.status = 'ready'; completePhase(state, 'combat-resolve', cards);
-  resolveAfterDefenderAction(state, player, cards, bashesReadyToResolve);
-  const actingUnit = state.units.find(item => item.owner === player && item.troopId === action.troopId);
-  // The troop may finish triggers caused directly by its chosen action, but
-  // it is inactive before the End window opens. This prevents a deployment
-  // (for example Wandering Monarch) from also taking an End-triggered action
-  // during the same turn.
-  const tireless = commandRow.action.type?.includes('tireless') ?? false;
-  if (actingUnit && !tireless) markUnitInactive(state, actingUnit);
-  else {
-    if (!actingUnit && !tireless) {
-      state.lastActingTroopId ??= {};
-      state.lastActingTroopId[player] = action.troopId;
-    }
-  }
-  // Combat completes before end-of-turn passives. Own and opponent triggers
-  // are deliberately separate, so a card can opt into exactly one of them.
-  const endRow = recordPhase(state, 'end', cards);
-  publishRuleEvent(state, phaseEvent(state, 'end', player), cards);
   state.revision = (state.revision ?? 0) + 1;
-  state.events ??= [];
-  state.events.push({ revision: state.revision, player, action: structuredClone(action), ...(vacatedCoordinate ? { origin: vacatedCoordinate } : {}) });
-  if (state.pendingResolution) return state;
-  completeEndForBashes(state);
-  publishRuleEvent(state, phaseEvent(state, 'opponent-end', player), cards);
-  finishStackAction(state, endRow.id); finishStackAction(state, commandRow.id);
-  reactivateEligibleTroopsAtTurnEnd(state, player);
-  clearStunAtTurnEnd(state, player);
-  state.activePlayer = player === 1 ? 2 : 1;
-  beginTurn(state, state.activePlayer);
-  const nextPlayer = state.activePlayer;
-  const startRow = recordPhase(state, 'start', cards);
-  publishRuleEvent(state, phaseEvent(state, 'start', nextPlayer), cards);
-  publishRuleEvent(state, phaseEvent(state, 'opponent-start', nextPlayer), cards);
-  finishStackAction(state, startRow.id); completePhase(state, 'action', cards);
+  (state.events ??= []).push({ revision: state.revision, player, action: structuredClone(action), ...(vacatedCoordinate ? { origin: vacatedCoordinate } : {}) });
+  finishStackAction(state, commandRow.id);
   return state;
 }
 
@@ -1147,6 +1161,7 @@ function normalizedIntent(before: GameState, player: Player, action: GameAction)
   const target = 'destination' in action ? action.destination : 'coordinate' in action ? action.coordinate : origin;
   const subject = acting ? { kind: 'unit' as const, unitId: unitId(acting) }
     : action.type === 'deploy' ? { kind: 'unit' as const, unitId: `${player}:${action.troopId}` as UnitId }
+    : before.pendingResolution ? { kind: 'unit' as const, unitId: `${player}:${before.pendingResolution.sourceTroopId}` as UnitId }
     : undefined;
   const object = target ? { kind: 'hex' as const, coordinate: target } : undefined;
   return {
@@ -1160,13 +1175,77 @@ function runtimeRules(state: GameState, cards: ReadonlyMap<string, TroopSeed>): 
     const deckIndex = state.deckOrder?.[unit.owner]?.indexOf(unit.troopId) ?? -1;
     return [unit.owner === state.activePlayer ? 0 : 1, deckIndex >= 0 ? deckIndex : Number.MAX_SAFE_INTEGER, cards.get(unit.troopId)?.role === 'hero' ? 0 : 1, unit.troopId];
   };
-  return [...state.units].sort((left, right) => {
+  const units = [...state.units];
+  // A hero's Start rule exists in the deck before it is deployed as well.
+  for (const owner of [1, 2] as const) {
+    if (units.some(unit => unit.owner === owner && cards.get(unit.troopId)?.role === 'hero')) continue;
+    const heroId = state.deckOrder?.[owner]?.find(id => cards.get(id)?.role === 'hero');
+    if (heroId && !units.some(unit => unit.owner === owner && unit.troopId === heroId)) units.push({ id: `${owner}:${heroId}`, owner, troopId: heroId, coordinate: (owner === 1 ? '-2,0' : '2,0') as Coordinate, permanentDamage: 0 });
+  }
+  return units.sort((left, right) => {
     const a = priority(left); const b = priority(right);
     return a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3].localeCompare(b[3]);
-  }).flatMap(unit => (cards.get(unit.troopId)?.rules ?? []).map((rule, index) => ({
+  }).flatMap(unit => [
+    ...(cards.get(unit.troopId)?.role === 'hero' ? [{ id: `${unit.troopId}:turn-action`, sourceUnitId: unitId(unit), sourceSnapshot: structuredClone(unit), rule: heroTurnActionRule }] : []),
+    ...(state.units.includes(unit) ? cards.get(unit.troopId)?.rules ?? [] : []).map((rule, index) => ({
     id: `${unit.troopId}:${cards.get(unit.troopId)?.ruleIds?.[index] ?? `rule-${index + 1}`}`,
     sourceUnitId: unitId(unit), sourceSnapshot: structuredClone(unit), rule
-  })));
+  }))]);
+}
+
+function engineRuntimeHooks(state: GameState, cards: ReadonlyMap<string, TroopSeed>): RuleRuntimeHooks {
+  return {
+    actionCosts: true,
+    choose: (intents, source, event, allTargets) => {
+      const unit = findUnit(state, source.sourceUnitId) ?? source.sourceSnapshot;
+      if (!unit) return;
+      const legal = intents.filter(intent => {
+        if (intent.name.startsWith('up-')) return true;
+        const probe = structuredClone(state);
+        probe.pendingResolution = undefined;
+        const probeSource = findUnit(probe, source.sourceUnitId);
+        if (!probeSource) return false;
+        const result = applyNormalizedTriggeredIntent(probe, intent, event, cards);
+        return result?.success ?? false;
+      });
+      if (legal.length) state.pendingResolution = { kind: 'rule-choice', owner: unit.owner, turnPlayer: event.controller, sourceUnitId: source.sourceUnitId, sourceTroopId: unit.troopId, intents: legal, ...(allTargets ? { allTargets: true } : {}), ...(legal[0].mandatory ? { required: true } : {}) };
+    },
+    prepare: intent => {
+      if (intent.confirmed) return;
+      if (intent.causedByRuleId && intent.triggeringEvent && intent.target && !intent.mandatory && ruleWord(intent.name)?.eventClass === 'action') {
+        if (!intent.costsPaid && !validateActionCosts(state, implicitActionCosts(intent, false))) return 'skip';
+        const source = runtimeRules(state, cards).find(source => source.id === intent.causedByRuleId);
+        if (!source) return 'skip';
+        engineRuntimeHooks(state, cards).choose?.([intent], source, intent.triggeringEvent);
+        return state.pendingResolution ? 'waiting' : 'skip';
+      }
+      if (!intent.causedByRuleId || !intent.triggeringEvent || intent.target || ['activate', 'deactivate', 'up-actions'].includes(intent.name)) return;
+      if (!intent.costsPaid && !validateActionCosts(state, implicitActionCosts(intent, false))) return 'skip';
+      // Default-target choices are prepared without paying or announcing an event.
+      const action = cardActionFromNormalizedIntent(intent);
+      const needsChoice = action && (['move', 'fly', 'ranged', 'fire', 'pull', 'revive'].includes(action.kind) || (action.kind === 'stun' && intent.triggeringEvent.object?.kind !== 'unit'));
+      if (!needsChoice) return;
+      const result = applyNormalizedTriggeredIntent(state, intent, intent.triggeringEvent, cards);
+      if (result.success && state.pendingResolution) {
+        if (intent.costsPaid) state.pendingResolution.costs = [];
+        return 'waiting';
+      }
+      return 'skip';
+    },
+    bundle: (events, kind) => {
+      if (!events.length) return;
+      const first = events[0];
+      const row = appendStackAction(state, cards, {
+        status: 'ready', phase: state.phase ?? 'action', activePlayer: state.activePlayer,
+        controller: first.controller, ...(first.subject?.kind === 'unit' ? { sourceUnitId: first.subject.unitId } : {}),
+        action: { kind: kind === 'cost' ? 'deactivate' : 'phase', range: 0 }, targetHexes: [],
+        bundle: { kind, events: structuredClone([...events]) }
+      });
+      finishStackAction(state, row.id);
+    },
+    apply: intent => applyNormalizedTriggeredIntent(state, intent, intent.triggeringEvent ?? phaseEvent(state, 'start', intent.controller), cards),
+    materializeState: (source, consequence, event) => materializeNativeTransientModifier(state, cards, source, consequence, event)
+  };
 }
 
 /**
@@ -1175,10 +1254,86 @@ function runtimeRules(state: GameState, cards: ReadonlyMap<string, TroopSeed>): 
  */
 export function applyGameAction(before: GameState, player: Player, action: GameAction, cards: ReadonlyMap<string, TroopSeed>): GameState {
   const state = structuredClone(before);
+  state.actions ??= { 1: playerActions(before, 1), 2: playerActions(before, 2) };
+  return executeGameCommand(state, player, action, cards);
+}
+
+function executeGameCommand(state: GameState, player: Player, action: GameAction, cards: ReadonlyMap<string, TroopSeed>, paid = false): GameState {
+  if (state.pendingResolution?.kind === 'rule-choice') {
+    const pending = state.pendingResolution;
+    if (!('troopId' in action) || pending.owner !== player || action.troopId !== pending.sourceTroopId || !['resolve-rule', 'resolve-pass'].includes(action.type)) throw new Error('Resolve the pending rule target first.');
+    if (action.type === 'resolve-pass' && pending.required) throw new Error('This triggered action is mandatory.');
+    const chosen = action.type === 'resolve-rule' ? pending.intents.find(intent => intent.target === action.coordinate && (!action.targetUnitId || intent.object?.kind === 'unit' && intent.object.unitId === action.targetUnitId)) : undefined;
+    if (action.type === 'resolve-rule' && !chosen) throw new Error('Invalid rule target.');
+    const hooks = engineRuntimeHooks(state, cards);
+    if (chosen) {
+      const costs = pending.costs ?? (chosen.costsPaid ? [] : implicitActionCosts(chosen, false));
+      if (!validateActionCosts(state, costs)) throw new Error('The rule cost cannot be paid.');
+      state.pendingResolution = undefined;
+      if (costs.length) executeNormalizedBundle(state, cards, runtimeRules(state, cards), costs, hooks, [], 'cost');
+      const intents = (pending.allTargets ? pending.intents : [chosen]).map(intent => ({ ...intent, confirmed: true, costsPaid: true, resumeBundle: true }));
+      for (const [index, intent] of intents.entries()) {
+        if (state.pendingResolution) {
+          (state.ruleWork ??= []).unshift(...intents.slice(index).map(intent => ({ kind: 'intent' as const, intent })));
+          break;
+        }
+        executeNormalizedIntent(state, cards, runtimeRules(state, cards), intent, hooks);
+      }
+    } else state.pendingResolution = undefined;
+    state.revision = (state.revision ?? 0) + 1;
+    if (!state.pendingResolution) resumeRuleRuntime(state, cards, runtimeRules(state, cards), hooks);
+    if (!state.pendingResolution && state.paidCommand) {
+      const continuation = state.paidCommand; state.paidCommand = continuation.parent;
+      if (continuation.pending) state.pendingResolution = continuation.pending;
+      return executeGameCommand(state, continuation.player, continuation.action, cards, true);
+    }
+    finishActionChain(state, cards);
+    return state;
+  }
   state.rulesVersion = 3;
   state.normalizedEvents ??= [];
   const intent = normalizedIntent(state, player, action);
   const command = actionForCommand(action, cards);
+  const pendingBefore = state.pendingResolution;
+  if (pendingBefore) intent.resumeBundle = true;
+  const standalone = !pendingBefore && !action.type.startsWith('resolve-');
+  intent.qualifiers = (command.type ?? []).flatMap(value => value === 'tireless' ? ['tireless' as const] : value === 'pierce' ? ['pierce' as const] : value === 'instant' ? ['fast' as const] : value === 'action-free' ? ['action-free' as const] : []);
+  const source = intent.subject?.kind === 'unit' ? findUnit(state, intent.subject.unitId) : undefined;
+  if (!paid && standalone && command.selector && intent.subject && 'coordinate' in action) {
+    if (!isBoardCoordinate(action.coordinate)) throw new Error('Invalid hex.');
+    const ability = action.type as UpgradableAbility;
+    const bonus = source ? upgradeBonus(source, ability).right + (ability === 'attack' || ability === 'magic' || ability === 'move' ? staticBonus(state, source, cards, ability).right : 0) + (ability === 'attack' ? source.rangedRangeBonus ?? 0 : 0) : 0;
+    const selected = selectRuleHexes(expandSelector(command.selector, bonus), { state, cards, controller: player, self: intent.subject, phraseSubject: source?.coordinate });
+    if (!selected.ok || !selected.value.includes(action.coordinate)) throw new Error('The selected target does not match the action selector.');
+  }
+  const derivedQualifiers = source && effectiveUnitState(state, source, cards, normalizedDerivedRules(state, cards)).actionUpdates.get(intent.name)?.qualifiers;
+  for (const qualifier of ['tireless', 'pierce', 'fast'] as const) if ((derivedQualifiers?.has(qualifier) || (qualifier === 'tireless' && pendingBefore?.tireless)) && !intent.qualifiers.includes(qualifier)) intent.qualifiers.push(qualifier);
+  if (!paid) {
+    // Validate against a disposable state before any payment or announcement.
+    applyAuthoritativeAction(structuredClone(state), player, action, cards, undefined, { mutationOnly: true });
+    const costs = action.type === 'resolve-pass' ? [] : pendingBefore?.costs ?? (command.costs ? explicitActionCosts(command.costs, intent) : action.type === 'pass'
+      ? [{ name: 'up-actions', controller: player, object: { kind: 'player' as const, player }, parameters: [-1], qualifiers: [] } as NormalizedActionIntent]
+      : implicitActionCosts(intent, standalone));
+    if (!validateActionCosts(state, costs)) throw new Error('The action cost cannot be paid: inactive source or insufficient action tokens.');
+    if (standalone) state.turnCommand = { player, action, readyBashes: state.bashes.filter(bash => !bash.awaitingEnd).map(bash => `${bash.attackerId}/${bash.defenderId}/${bash.target}`) };
+    if (costs.length) {
+      // The current choice must not prevent its own payment triggers from running.
+      if (pendingBefore) state.pendingResolution = undefined;
+      const costRules = runtimeRules(state, cards);
+      if (action.type === 'deploy') for (const [index, rule] of (cards.get(action.troopId)?.rules ?? []).entries()) costRules.push({
+        id: `${action.troopId}:rule-${index + 1}`, sourceUnitId: `${player}:${action.troopId}`,
+        sourceSnapshot: { id: `${player}:${action.troopId}`, owner: player, troopId: action.troopId, coordinate: action.coordinate, permanentDamage: 0 }, rule
+      });
+      executeNormalizedBundle(state, cards, costRules, costs, engineRuntimeHooks(state, cards), [], 'cost');
+      if (state.pendingResolution) {
+        state.paidCommand = { player, action, pending: pendingBefore, parent: state.paidCommand };
+        state.revision = (state.revision ?? 0) + 1;
+        return state;
+      }
+      if (pendingBefore) state.pendingResolution = pendingBefore;
+    }
+  }
+  intent.costsPaid = true;
   const stateRows: Array<{ source: RuntimeRuleSource; consequence: Extract<RuleTriggeredConsequence, { kind: 'stored-state' }>; beforeHealth?: number }> = [];
   const delayed = (action.type === 'attack' || action.type === 'magic' || action.type === 'cannon') && !command.type?.includes('instant');
   const rules = runtimeRules(state, cards);
@@ -1221,7 +1376,8 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       finishStackAction(state, row.id, row.outcome);
     }
   };
-  const result = executeNormalizedIntent(state, cards, rules, intent, {
+  const result = executeNormalizedCommand(state, cards, rules, intent, {
+    ...engineRuntimeHooks(state, cards),
     mode: candidate => candidate === intent
       ? delayed ? 'deferred' : 'immediate'
       : ['bow', 'fire', 'cannon', 'gore-attack', 'bomb-explode'].includes(candidate.name) && !candidate.qualifiers.includes('fast') ? 'deferred' : 'immediate',
@@ -1229,10 +1385,15 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       if (_intent.causedByRuleId && _intent.triggeringEvent) {
         return applyNormalizedTriggeredIntent(state, _intent, _intent.triggeringEvent, cards);
       }
+      try {
+        applyAuthoritativeAction(structuredClone(state), player, action, cards, undefined, { mutationOnly: true, costsPaid: true });
+      } catch (error) {
+        return { success: false, canceled: true, reason: error instanceof Error ? error.message : String(error) };
+      }
       applyAuthoritativeAction(state, player, action, cards, appliedState => {
         eventResolved?.(appliedState);
         flushStateRows();
-      });
+      }, { mutationOnly: true, costsPaid: true });
       flushStateRows();
       return { success: true };
     },
@@ -1243,9 +1404,58 @@ export function applyGameAction(before: GameState, player: Player, action: GameA
       }
       return materializeNativeTransientModifier(state, cards, source, consequence, normalizedEvent);
     }
-  });
-  if (result.canceled) throw new Error(result.reason ?? 'Action was canceled.');
+  }, command.followups);
+  // A cost-trigger may invalidate the committed action. Its paid costs remain.
+  if (result.canceled) state.revision = (state.revision ?? 0) + 1;
+  if (action.type === 'resolve-pass' && pendingBefore?.costs && state.ruleWork?.[0]?.kind === 'consequences') state.ruleWork.shift();
+  if (!state.pendingResolution) resumeRuleRuntime(state, cards, runtimeRules(state, cards), engineRuntimeHooks(state, cards));
+  if (state.pendingResolution) return state;
+  if (state.paidCommand) {
+    const continuation = state.paidCommand;
+    state.paidCommand = continuation.parent;
+    if (continuation.pending) state.pendingResolution = continuation.pending;
+    return executeGameCommand(state, continuation.player, continuation.action, cards, true);
+  }
+  finishActionChain(state, cards);
   return state;
+}
+
+function finishActionChain(state: GameState, cards: ReadonlyMap<string, TroopSeed>): void {
+  if (state.pendingResolution || state.winner) return;
+  const player = state.activePlayer;
+  if (state.phase === 'start') { completePhase(state, 'action', cards); return; }
+  if (state.phase !== 'end') {
+    if (playerActions(state, player) > 0) {
+      delete state.turnCommand;
+      completePhase(state, 'action', cards);
+      return;
+    }
+    const ready = new Set(state.bashes.filter(bash => !bash.awaitingEnd));
+    completePhase(state, 'combat-resolve', cards);
+    resolveAfterDefenderAction(state, player, cards, ready);
+    recordPhase(state, 'end', cards);
+    publishRuleEvent(state, phaseEvent(state, 'end', player), cards);
+    if (state.pendingResolution) return;
+  }
+  completeEndForBashes(state);
+  publishRuleEvent(state, phaseEvent(state, 'opponent-end', player), cards);
+  if (state.pendingResolution) return;
+  finishOpenStack(state);
+  reactivateEligibleTroopsAtTurnEnd(state, player);
+  clearStunAtTurnEnd(state, player);
+  delete state.turnCommand;
+  state.activePlayer = player === 1 ? 2 : 1;
+  beginTurn(state, state.activePlayer);
+  const startRow = recordPhase(state, 'start', cards);
+  // Small engine fixtures and old saves may not carry a deck yet.
+  if (!runtimeRules(state, cards).some(source => source.id.endsWith(':turn-action') && source.sourceSnapshot?.owner === state.activePlayer)) {
+    const hero = [...cards.values()].find(card => card.role === 'hero');
+    if (hero) executeNormalizedIntent(state, cards, runtimeRules(state, cards), { name: 'up-actions', subject: { kind: 'unit', unitId: `${state.activePlayer}:${hero.id}` }, object: { kind: 'player', player: state.activePlayer }, parameters: [1], qualifiers: [], controller: state.activePlayer }, engineRuntimeHooks(state, cards));
+  }
+  publishRuleEvent(state, phaseEvent(state, 'start', state.activePlayer), cards);
+  publishRuleEvent(state, phaseEvent(state, 'opponent-start', state.activePlayer), cards);
+  finishStackAction(state, startRow.id);
+  if (!state.pendingResolution) completePhase(state, 'action', cards);
 }
 
 function effectRuleName(effect: Effect): string {

@@ -105,7 +105,7 @@ test('Duelist Scorpion resolves its enemy-side deploy trigger after entering the
 
   assert.deepEqual(duelist?.shields?.map(shield => shield.value), [3]);
   assert.equal(duelist?.magicModifierBonus, 3);
-  assert.deepEqual(next.normalizedEvents?.at(-1)?.object, { kind: 'hex', coordinate: '0,-1' });
+  assert.deepEqual(next.normalizedEvents?.find(event => event.name === 'deploy' && event.stage === 'resolved')?.object, { kind: 'hex', coordinate: '0,-1' });
 });
 
 test('Ironscale Rhino deploys only into a controlled enemy starting region', () => {

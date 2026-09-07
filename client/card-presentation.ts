@@ -1,5 +1,6 @@
 import type { UpgradableAbility } from '../game/cards.js';
 import type { Player } from '../game/types.js';
+import { propertyText } from './card-rule-text.js';
 import type { Point } from './board-animation-geometry.js';
 import { hexGap, hexSize, horizontalScale, svgNamespace } from './board-geometry.js';
 import { cardRuleDetails, catalogueById, goreIcon, healthDescription, healthOf, permanentUpgradeBonus, pullIcon, staticAuraBonus, stunIcon, troopDisplayName, upgradeBonus, type Troop } from './troop-view.js';
@@ -26,10 +27,10 @@ export function cardTroopIcon(role: Troop['role']): HTMLImageElement {
 }
 
 function appendRelationText(parent: HTMLElement, text: string, owner: Player, extraClass?: string): void {
-  for (const part of text.split(/(\[\[(?:friend|enemy)(?:-dark)?:[^\]]+\]\])/u).filter(Boolean)) {
-    const marker = part.match(/^\[\[(friend|enemy)(-dark)?:([^\]]+)\]\]$/u);
+  for (const part of text.split(/(\[\[(?:friend|enemy|neutral)(?:-dark)?:[^\]]+\]\])/u).filter(Boolean)) {
+    const marker = part.match(/^\[\[(friend|enemy|neutral)(-dark)?:([^\]]+)\]\]$/u);
     if (!marker) { const node = document.createTextNode(part); parent.append(node); continue; }
-    const player = marker[1] === 'friend' ? owner : owner === 1 ? 2 : 1;
+    const player = marker[1] === 'neutral' ? 0 : marker[1] === 'friend' ? owner : owner === 1 ? 2 : 1;
     const span = document.createElement('span'); span.classList.add(`relation-player-${player}${marker[2] ? '-dark' : ''}`);
     if (extraClass) span.classList.add(extraClass); span.textContent = marker[3]; parent.append(span);
   }
@@ -91,14 +92,20 @@ export function createHoverCard(troop: Troop): { card: HTMLElement; copy: HTMLEl
 
 export function appendHoverRules(copy: HTMLElement, troop: Troop): void {
   const list = document.createElement('div'); list.classList.add('hover-rule-list');
-  for (const [index, rule] of cardRuleDetails(troop).entries()) {
-    const line = document.createElement('div'); line.classList.add('hover-rule-line'); if (index === 0) line.classList.add('hover-deployment-rule');
+  for (const rule of cardRuleDetails(troop)) {
+    const line = document.createElement('div'); line.classList.add('hover-rule-line');
     appendRichHoverRule(line, troop, rule); list.append(line);
+  }
+  for (const source of troop.effectiveRuleSources ?? []) {
+    if (!source.property.action) continue;
+    const line = document.createElement('div'); line.classList.add('hover-rule-line', 'hover-upgrade-source');
+    appendMagicDescriptionText(line, `${propertyText(source)} ${source.sourceName}`, troop.owner); list.append(line);
   }
   copy.append(list);
 }
 
 function appendRichHoverRule(line: HTMLElement, troop: Troop, rule: string): void {
+  if (/^~?\d+[PFTA]*🛡/u.test(rule)) { appendBoldCopy(line, rule, troop.owner); return; }
   const match = rule.match(/^(\d+)([PF]*)(🏹|🔥|🛡️|🧨|🐏|💣|❤️|🫸|🫷|🚫)(\d+)(.*)$/u);
   const movement = rule.match(/^(🥾|🪽)(\d+)(.*)$/u);
   if (!match && movement) {
@@ -125,10 +132,12 @@ function appendBonus(line: HTMLElement, value: number, className: string): void 
 }
 
 function appendBoldCopy(line: HTMLElement, text: string, owner: Player): void {
-  for (const token of text.split(/(\([^)]+\)|^[^:]+:)/u).filter(Boolean)) {
-    if ((token.startsWith('(') && token.endsWith(')')) || token.endsWith(':')) { const label = document.createElement('strong'); label.classList.add('hover-rule-label'); label.textContent = token; line.append(label); }
-    else appendMagicDescriptionText(line, token, owner);
+  const heading = text.match(/^((?:\[\[[^\]]+\]\]|[^:[\]])+):/u);
+  if (heading) {
+    const label = document.createElement('strong'); label.classList.add('hover-rule-label');
+    appendMagicDescriptionText(label, heading[0], owner); line.append(label);
   }
+  appendMagicDescriptionText(line, text.slice(heading?.[0].length ?? 0), owner);
 }
 
 function appendUpgradeSources(line: HTMLElement, troop: Troop, ability: UpgradableAbility, staticSourceIds: readonly string[]): void {

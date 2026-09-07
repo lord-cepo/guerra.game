@@ -35,12 +35,14 @@ export const ruleWords = {
   fire: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'delayed', damageKind: 'red-magic', aliases: ['fires'] },
   cannon: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'delayed', damageKind: 'black-magic' },
   'gore-attack': { kind: 'verb', arity: 2, userParameters: 0, eventClass: 'action', timing: 'delayed', damageKind: 'physical' },
-  'bomb-explode': { kind: 'verb', arity: 2, eventClass: 'result', timing: 'delayed', damageKind: 'black-magic', triggeredExecution: 'forced', triggeredDeactivates: false, note: 'Engine consequence caused by Fire, another explosion, or an explicit trigger.' },
+  'bomb-light': { kind: 'verb', arity: 2, eventClass: 'state-change', timing: 'instant', triggeredExecution: 'forced', triggeredDeactivates: false, note: 'Light an inert bomb, scheduling its explosion.' },
+  'bomb-explode': { kind: 'verb', arity: 2, eventClass: 'result', timing: 'delayed', damageKind: 'black-magic', triggeredExecution: 'forced', triggeredDeactivates: false, aliases: ['bomb-explode-resolve'], note: 'The bomb detonates and deals its scheduled damage.' },
   shield: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
   mshield: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
   move: { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'none' },
   fly: { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'none' },
   'gore-move': { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'action', timing: 'instant', damageKind: 'none' },
+  gore: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'physical' },
   push: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
   pull: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
   mend: { kind: 'verb', arity: 2, userParameters: 2, eventClass: 'action', timing: 'instant', damageKind: 'none' },
@@ -56,6 +58,8 @@ export const ruleWords = {
   deploy: { kind: 'verb', arity: 2, eventClass: 'state-change', aliases: ['deploys'], note: 'The subject is the deployed unit and the object is its destination hex.' },
   revive: { kind: 'verb', arity: 1, eventClass: 'state-change' },
   activate: { kind: 'verb', arity: 2, eventClass: 'state-change', aliases: ['act'], note: 'The subject is the activated unit and the object is its current hex.' },
+  deactivate: { kind: 'verb', arity: 2, userParameters: 0, eventClass: 'state-change', timing: 'instant' },
+  'up-actions': { kind: 'verb', arity: 2, userParameters: 1, eventClass: 'state-change', timing: 'instant', note: 'Mutates the action tokens of player you or opp; the subject identifies the source troop.' },
 
   wounded: { kind: 'property', observable: true, contributable: false },
   deployed: { kind: 'property', observable: true, contributable: false },
@@ -136,5 +140,15 @@ export function canonicalRuleWord(word: string): string {
 }
 
 export function ruleWord(word: string): RuleWordDefinition | undefined {
+  if (attackFamilies[word]) return { kind: 'verb', arity: 2, eventClass: 'result' };
+  if (/^up-(hex|unit|player)-(counter|flag)$/.test(word)) return { kind: 'verb', arity: 2, eventClass: 'state-change' };
+  if (/^(hex|unit|player)-(counter|flag)$/.test(word)) return { kind: 'property', arity: 1, observable: true, contributable: false };
   return ruleWords[canonicalRuleWord(word) as CanonicalRuleWord];
 }
+
+export const attackFamilies: Readonly<Record<string, readonly string[]>> = {
+  atk: ['fire', 'cannon', 'gore-attack', 'bash', 'bow'],
+  patk: ['gore-attack', 'bash', 'bow'],
+  ratk: ['fire', 'cannon']
+};
+export const matchesEventName = (pattern: string, actual: string): boolean => pattern === actual || Boolean(attackFamilies[pattern]?.includes(actual));

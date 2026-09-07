@@ -406,6 +406,7 @@
     .troop-card.server-owner-two.deployment-both::before { background: linear-gradient(#1d4ed8 50%, #60a5fa 50%); }
     .relation-player-1 { color: #f87171; fill: #f87171; }
     .relation-player-2 { color: #60a5fa; fill: #60a5fa; }
+    .relation-player-0 { color: white; fill: white; }
     .relation-player-1-dark { color: #991b1b; fill: #991b1b; }
     .relation-player-2-dark { color: #1e40af; fill: #1e40af; }
     /* Defeated/unavailable cards are neutral regardless of their owner. */
@@ -978,7 +979,7 @@
       min-height: 5.5rem;
       border: 0;
       border-radius: .65rem;
-      background: transparent;
+      background: #2b2a33;
       box-shadow: none;
     }
     #hover-details .hover-card.server-owner-one { border-color: #ef4444; }
@@ -1004,6 +1005,11 @@
       display: grid;
       gap: .28rem;
       margin-top: .25rem;
+    }
+    #hover-details .hover-detail-line + .hover-rule-list {
+      margin-top: .45rem;
+      padding-top: .45rem;
+      border-top: 1px solid rgb(203 213 225 / .3);
     }
     #hover-details .hover-rule-line {
       color: #f1f5f9;

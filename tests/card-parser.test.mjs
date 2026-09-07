@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseAction, parseActions, parseCard } from '../dist/game/card-parser.js';
+import { radiusSelector } from '../dist/game/action-selector.js';
 import { parseObservableCondition, parsePackedRuleAction, parseRule, parseRuleCondition, parseRuleEntity, parseRuleState } from '../dist/game/rule-parser.js';
 
 test('card parser derives names, troop role, regions, and function-form actions', () => {
@@ -8,7 +9,7 @@ test('card parser derives names, troop role, regions, and function-form actions'
   assert.equal(card.name, 'Test Card');
   assert.equal(card.role, 'troop');
   assert.deepEqual(card.deploymentRegions, ['starting', 'intermediate']);
-  assert.deepEqual(card.actions, [{ kind: 'move', range: 1 }, { kind: 'fire', amount: 2, range: 3 }]);
+  assert.deepEqual(card.actions, [{ kind: 'move', selector: radiusSelector(1) }, { kind: 'fire', amount: 2, selector: radiusSelector(3) }]);
 });
 
 test('card parse errors include the complete raw card information', () => {
@@ -30,15 +31,15 @@ test('card parse errors include the complete raw card information', () => {
 
 test('Fly suppresses implicit Move and qualified attacks compile in order', () => {
   assert.deepEqual(parseActions('fly(2), P.F.T.bow(1,3)'), [
-    { kind: 'fly', range: 2 },
-    { kind: 'ranged', amount: 1, range: 3, type: ['pierce', 'instant', 'tireless'] }
+    { kind: 'fly', selector: radiusSelector(2) },
+    { kind: 'ranged', amount: 1, selector: radiusSelector(3), type: ['pierce', 'instant', 'tireless'] }
   ]);
 });
 
 test('plus remains part of a magenta upgrade in the action dictionary', () => {
-  assert.deepEqual(parseAction('+1 bow +1'), { kind: 'upgrade', amount: [1, 1], range: 0, type: ['permanent', 'attack'] });
-  assert.deepEqual(parseAction('+1 life'), { kind: 'life', amount: 1, range: 0 });
-  assert.deepEqual(parseAction('-1 maxlife'), { kind: 'maxlife', amount: -1, range: 0 });
+  assert.deepEqual(parseAction('+1 bow +1'), { kind: 'upgrade', amount: [1, 1], selector: radiusSelector(0), type: ['permanent', 'attack'] });
+  assert.deepEqual(parseAction('+1 life'), { kind: 'life', amount: 1, selector: radiusSelector(0) });
+  assert.deepEqual(parseAction('-1 maxlife'), { kind: 'maxlife', amount: -1, selector: radiusSelector(0) });
 });
 
 test('enemy deployment regions and normalized rules compile explicitly', () => {
